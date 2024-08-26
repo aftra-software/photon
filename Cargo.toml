@@ -1,0 +1,18 @@
+[package]
+name = "rust_nuclei"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = "thin"
+#strip = true
+debug = true
+panic = "abort"
+opt-level = 3
+
+[dependencies]
+httparse = "1.9.4"
+regex = "1.10.6"
+ureq = "2.10.1"
+walkdir = "2.5.0"
+yaml-rust2 = "0.8.1"

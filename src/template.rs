@@ -1,7 +1,6 @@
 use std::{
-    cell::OnceCell,
     collections::HashMap,
-    sync::{Mutex, OnceLock, RwLock},
+    sync::{Mutex, OnceLock},
 };
 
 use crate::http::{HttpReq, HttpResponse};
@@ -15,6 +14,19 @@ pub enum Severity {
     Medium,
     High,
     Critical,
+}
+
+impl Severity {
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::Critical => "critical".to_string(),
+            Self::High => "high".to_string(),
+            Self::Medium => "medium".to_string(),
+            Self::Low => "low".to_string(),
+            Self::Info => "info".to_string(),
+            Self::Unknown => "unknown".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -148,7 +160,6 @@ pub struct HttpRequest {
     pub matchers: Vec<Matcher>,
     pub matchers_condition: Condition,
     pub path: Vec<HttpReq>,
-    pub method: Method,
 }
 
 #[derive(Debug)]

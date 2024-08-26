@@ -62,13 +62,13 @@ fn map_method(method: &str) -> Option<Method> {
     }
 }
 
-fn map_part(part: &str, default: ResponsePart) -> ResponsePart {
+fn map_part(part: &str) -> Option<ResponsePart> {
     match part.to_lowercase().as_str() {
-        "header" => ResponsePart::Header,
-        "body" => ResponsePart::Body,
-        "all" => ResponsePart::All,
-        "raw" => ResponsePart::Raw,
-        _ => default,
+        "header" => Some(ResponsePart::Header),
+        "body" => Some(ResponsePart::Body),
+        "all" => Some(ResponsePart::All),
+        "raw" => Some(ResponsePart::Raw),
+        _ => None,
     }
 }
 
@@ -166,9 +166,15 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
     let matcher_type = yaml["type"].as_str();
     validate_fields(&[(matcher_type, "type")])?;
 
-    let part = match matcher_part {
-        Some(match_part) => map_part(match_part, ResponsePart::Body),
-        None => ResponsePart::Body,
+    let part = {
+        let part_mat = match matcher_part {
+            Some(match_part) => map_part(match_part),
+            None => Some(ResponsePart::Body),
+        };
+        if part_mat.is_none() {
+            return Err(TemplateError::InvalidValue("part".into()));
+        }
+        part_mat.unwrap()
     };
 
     let condition = if yaml["condition"].as_str().is_some() {
@@ -238,7 +244,7 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
         condition,
         r#type: matcher_type,
         negative,
-        internal
+        internal,
     })
 }
 
@@ -269,11 +275,7 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
         }
     };
 
-    let matchers_parsed: Vec<_> = http_matchers
-        .unwrap()
-        .iter()
-        .map(parse_matcher)
-        .collect();
+    let matchers_parsed: Vec<_> = http_matchers.unwrap().iter().map(parse_matcher).collect();
 
     if matchers_parsed.iter().any(|item| item.is_err()) {
         return Err(matchers_parsed
@@ -335,7 +337,6 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
     requests.append(&mut raw);
 
     Ok(HttpRequest {
-        method,
         matchers_condition,
         matchers,
         path: requests,

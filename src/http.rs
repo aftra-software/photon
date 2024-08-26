@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::{Mutex, OnceLock}};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 
 use regex::Regex;
 use ureq::Response;
@@ -56,6 +59,7 @@ impl HttpReq {
                 ureq::Error::Status(_, resp) => Some(resp),
                 _ => {
                     println!("Err: {}", err);
+                    println!("    - {}", path);
                     None
                 }
             },
@@ -83,6 +87,7 @@ impl HttpReq {
                             ureq::Error::Status(_, resp) => Some(parse_response(resp)),
                             _ => {
                                 println!("Err: {}", err);
+                                println!("    - {}", req.path.unwrap());
                                 None
                             }
                         },

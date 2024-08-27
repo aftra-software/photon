@@ -27,6 +27,17 @@ impl Severity {
             Self::Unknown => "unknown".to_string(),
         }
     }
+
+    pub fn colored_string(&self) -> String {
+        match self {
+            Self::Critical => "\x1b[0;35mcritical\x1b[0m".to_string(),
+            Self::High => "\x1b[0;31mhigh\x1b[0m".to_string(),
+            Self::Medium => "\x1b[0;33mmedium\x1b[0m".to_string(),
+            Self::Low => "\x1b[0;90mlow\x1b[0m".to_string(),
+            Self::Info => "\x1b[0;36minfo\x1b[0m".to_string(),
+            Self::Unknown => "\x1b[0;90munknown\x1b[0m".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]

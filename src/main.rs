@@ -79,8 +79,6 @@ fn main() {
         }
     }
 
-    println!("{:?}", tokens);
-
     let base_url = &args.url;
     let request_agent = Agent::new();
 
@@ -98,7 +96,7 @@ fn main() {
                 break;
             }
             for req in http.path {
-                if stopwatch.elapsed().as_secs_f32() > 10.0 {
+                if stopwatch.elapsed().as_secs_f32() > 20.0 {
                     println!(
                         "RPS: {}, Template: {}/{}, Requests: {}",
                         (reqs - last_reqs) as f32 / stopwatch.elapsed().as_secs_f32(),
@@ -123,7 +121,7 @@ fn main() {
                     if matches {
                         // TODO: Handle matching better with `http.matchers_condition`
 
-                        println!("Matched: [{}] {}", t.info.severity.to_string(), t.id);
+                        println!("Matched: [{}] {}", t.info.severity.colored_string(), t.id);
                         skip = true;
                         break;
                     }

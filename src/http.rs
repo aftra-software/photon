@@ -4,7 +4,7 @@ use std::{
 };
 
 use regex::Regex;
-use ureq::Response;
+use ureq::{Agent, Response};
 
 use crate::template::Method;
 
@@ -47,13 +47,13 @@ impl HttpReq {
             .replace("HTTP/2", "HTTP/1.1")
     }
 
-    fn internal_request(&self, path: &str) -> Option<Response> {
+    fn internal_request(&self, path: &str, agent: &Agent) -> Option<Response> {
         let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(&path) {
             return None;
         }
 
-        let res = ureq::get(&path).call();
+        let res = agent.get(&path).call();
         match res {
             Err(err) => match err {
                 ureq::Error::Status(_, resp) => Some(resp),
@@ -67,7 +67,7 @@ impl HttpReq {
         }
     }
 
-    fn raw_request(&self, base_url: &str) -> Option<HttpResponse> {
+    fn raw_request(&self, base_url: &str, agent: &Agent) -> Option<HttpResponse> {
         let mut headers = [httparse::EMPTY_HEADER; 32];
         let mut req = httparse::Request::new(&mut headers);
         let baked_raw = self.bake_raw(base_url);
@@ -81,7 +81,7 @@ impl HttpReq {
         match res {
             Ok(_) => {
                 if req.method.is_some() && req.path.is_some() {
-                    let resp = ureq::request(req.method.unwrap(), req.path.unwrap()).call();
+                    let resp = agent.request(req.method.unwrap(), req.path.unwrap()).call();
                     match resp {
                         Err(err) => match err {
                             ureq::Error::Status(_, resp) => Some(parse_response(resp)),
@@ -104,8 +104,10 @@ impl HttpReq {
     pub fn do_request(
         &self,
         base_url: &str,
+        agent: &Agent,
         req_counter: &mut u32,
         cache: &mut HashMap<(Method, String), Option<HttpResponse>>,
+        allowed_cache: &HashMap<(Method, String), u16>
     ) -> Option<HttpResponse> {
         let path = self.bake(base_url);
         if !path.is_empty() && !path.contains(base_url) {
@@ -114,20 +116,33 @@ impl HttpReq {
 
         if !self.raw.is_empty() {
             *req_counter += 1;
-            return self.raw_request(base_url);
+            return self.raw_request(base_url, agent);
+        }
+        
+        // Skip caching below if we know the request is only happening once
+        if !allowed_cache.contains_key(&(self.method, self.path.clone())) {
+            *req_counter += 1;
+            let res = self.internal_request(&path, agent);
+            if let Some(resp) = res {
+                return Some(parse_response(resp));
+            } else {
+                return None;
+            }
         }
 
-        if cache.contains_key(&(self.method, path.clone())) {
+        let key = (self.method, path.clone());
+        
+        if cache.contains_key(&key) {
             return cache.get(&(self.method, path)).unwrap().clone();
         }
         *req_counter += 1;
-        let res = self.internal_request(&path);
+        let res = self.internal_request(&path, agent);
         if let Some(resp) = res {
-            cache.insert((self.method, path.clone()), Some(parse_response(resp)));
+            cache.insert(key.clone(), Some(parse_response(resp)));
         } else {
-            cache.insert((self.method, path.clone()), None);
+            cache.insert(key.clone(), None);
         }
 
-        return cache.get(&(self.method, path)).unwrap().clone();
+        return cache.get(&key).unwrap().clone();
     }
 }

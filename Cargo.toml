@@ -9,8 +9,10 @@ lto = "thin"
 debug = true
 panic = "abort"
 opt-level = 3
+codegen-units = 1
 
 [dependencies]
+clap = { version = "4.5.16", features = ["derive"] }
 httparse = "1.9.4"
 regex = "1.10.6"
 ureq = "2.10.1"

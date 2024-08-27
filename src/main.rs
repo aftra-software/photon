@@ -1,12 +1,14 @@
 use std::{collections::HashMap, sync::Mutex, time::Instant};
 
-use http::{HttpResponse, IGNORE_PATTERN};
+use cache::{Cache, CacheKey};
+use http::IGNORE_PATTERN;
 use regex::Regex;
-use template::{Condition, Method, REGEX_CACHE};
+use template::{Condition, REGEX_CACHE};
 use template_loader::load_template;
 use ureq::Agent;
 use walkdir::WalkDir;
 
+mod cache;
 mod http;
 mod template;
 mod template_loader;
@@ -59,30 +61,32 @@ fn main() {
         (success as f32 / total as f32) * 100.0
     );
 
-    let mut allowed_cache: HashMap<(Method, String), u16> = HashMap::new();
+    let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
     for template in loaded_templates.iter() {
         for http in template.http.iter() {
             for request in http.path.iter() {
-                allowed_cache.entry((request.method, request.path.clone())).and_modify(|val| *val += 1).or_insert(1);
+                tokens
+                    .entry(CacheKey(request.method, request.path.clone()))
+                    .and_modify(|val| *val += 1)
+                    .or_insert(1);
             }
         }
     }
-    let keys: Vec<(Method, String)> = allowed_cache.keys().cloned().collect();
+    let keys: Vec<CacheKey> = tokens.keys().cloned().collect();
     for key in keys {
-        if *allowed_cache.get(&key).unwrap() == 1 {
-            allowed_cache.remove(&key);
+        if *tokens.get(&key).unwrap() == 1 {
+            tokens.remove(&key);
         }
     }
 
-    println!("{:?}", allowed_cache);
-
+    println!("{:?}", tokens);
 
     let base_url = &args.url;
     let request_agent = Agent::new();
 
     let mut reqs = 0;
     let mut last_reqs = 0;
-    let mut cache: HashMap<(Method, String), Option<HttpResponse>> = HashMap::new();
+    let mut cache = Cache::new(tokens);
     let mut stopwatch = Instant::now();
 
     let template_len = loaded_templates.len();
@@ -105,7 +109,7 @@ fn main() {
                     last_reqs = reqs;
                     stopwatch = Instant::now();
                 }
-                let resp = req.do_request(base_url, &request_agent, &mut reqs, &mut cache, &allowed_cache);
+                let resp = req.do_request(base_url, &request_agent, &mut reqs, &mut cache);
                 if let Some(body) = resp {
                     let matches = if http.matchers_condition == Condition::OR {
                         http.matchers

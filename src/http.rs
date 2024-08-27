@@ -1,12 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{Mutex, OnceLock},
-};
+use std::sync::{Mutex, OnceLock};
 
 use regex::Regex;
 use ureq::{Agent, Response};
 
-use crate::template::Method;
+use crate::{
+    cache::{Cache, CacheKey},
+    template::Method,
+};
 
 pub static IGNORE_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
 
@@ -106,8 +106,7 @@ impl HttpReq {
         base_url: &str,
         agent: &Agent,
         req_counter: &mut u32,
-        cache: &mut HashMap<(Method, String), Option<HttpResponse>>,
-        allowed_cache: &HashMap<(Method, String), u16>
+        cache: &mut Cache,
     ) -> Option<HttpResponse> {
         let path = self.bake(base_url);
         if !path.is_empty() && !path.contains(base_url) {
@@ -118,9 +117,10 @@ impl HttpReq {
             *req_counter += 1;
             return self.raw_request(base_url, agent);
         }
-        
+
         // Skip caching below if we know the request is only happening once
-        if !allowed_cache.contains_key(&(self.method, self.path.clone())) {
+        let unbaked_key = CacheKey(self.method, self.path.clone());
+        if !cache.can_cache(&unbaked_key) {
             *req_counter += 1;
             let res = self.internal_request(&path, agent);
             if let Some(resp) = res {
@@ -130,19 +130,18 @@ impl HttpReq {
             }
         }
 
-        let key = (self.method, path.clone());
-        
-        if cache.contains_key(&key) {
-            return cache.get(&(self.method, path)).unwrap().clone();
-        }
-        *req_counter += 1;
-        let res = self.internal_request(&path, agent);
-        if let Some(resp) = res {
-            cache.insert(key.clone(), Some(parse_response(resp)));
-        } else {
-            cache.insert(key.clone(), None);
+        let key = CacheKey(self.method, path.clone());
+
+        if !cache.contains(&key) {
+            *req_counter += 1;
+            let res = self.internal_request(&path, agent);
+            if let Some(resp) = res {
+                cache.store(&key, Some(parse_response(resp)));
+            } else {
+                cache.store(&key, None);
+            }
         }
 
-        return cache.get(&key).unwrap().clone();
+        return cache.get(&key, &unbaked_key);
     }
 }

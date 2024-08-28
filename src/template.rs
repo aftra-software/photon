@@ -1,8 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::{Mutex, OnceLock},
-};
-
 use crate::http::{HttpReq, HttpResponse};
 use regex::{Regex, RegexSet};
 

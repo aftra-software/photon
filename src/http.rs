@@ -58,16 +58,17 @@ impl HttpReq {
         *req_counter += 1;
         let stopwatch = Instant::now();
         let res = agent.get(&path).call();
+        let duration = stopwatch.elapsed().as_secs_f32();
         match res {
             Err(err) => match err {
-                ureq::Error::Status(_, resp) => Some((resp, stopwatch.elapsed().as_secs_f32())),
+                ureq::Error::Status(_, resp) => Some((resp, duration)),
                 _ => {
                     println!("Err: {}", err);
                     println!("    - {}", path);
                     None
                 }
             },
-            Ok(resp) => Some((resp, stopwatch.elapsed().as_secs_f32())),
+            Ok(resp) => Some((resp, duration)),
         }
     }
 

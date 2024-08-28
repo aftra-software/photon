@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Mutex, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+    time::Instant,
+};
 
 use cache::{Cache, CacheKey};
 use http::IGNORE_PATTERN;
@@ -15,19 +19,30 @@ mod template_loader;
 
 use clap::Parser;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
     #[arg(short, long)]
     url: String,
+
+    #[arg(short, long, default_value_t = false)]
+    verbose: bool,
 }
+
+struct Config {
+    verbose: bool,
+}
+
+static CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn main() {
     let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{.*}}").unwrap()));
 
     let args = Args::parse();
+
+    let _ = CONFIG.set(Config {
+        verbose: args.verbose,
+    });
 
     let dir = "nuclei-templates";
     let mut total = 0;

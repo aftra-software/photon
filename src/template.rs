@@ -141,14 +141,12 @@ impl Matcher {
         };
         match &self.r#type {
             MatcherType::DSL(_) => false,
-            MatcherType::Regex(regexes) => {
-                match regexes {
-                    RegexType::PatternList(patterns) => patterns
-                    .iter()
-                    .all(|pattern| pattern.is_match(&data)),
-                    RegexType::Set(patterns) => patterns.is_match(&data)
+            MatcherType::Regex(regexes) => match regexes {
+                RegexType::PatternList(patterns) => {
+                    patterns.iter().all(|pattern| pattern.is_match(&data))
                 }
-            }
+                RegexType::Set(patterns) => patterns.is_match(&data),
+            },
             MatcherType::Word(words) => {
                 if self.condition == Condition::OR {
                     words.iter().any(|needle| data.contains(needle))

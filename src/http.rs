@@ -1,4 +1,7 @@
-use std::{sync::{Mutex, OnceLock}, time::Instant};
+use std::{
+    sync::{Mutex, OnceLock},
+    time::Instant,
+};
 
 use regex::Regex;
 use ureq::{Agent, Response};
@@ -6,6 +9,7 @@ use ureq::{Agent, Response};
 use crate::{
     cache::{Cache, CacheKey},
     template::Method,
+    CONFIG,
 };
 
 pub static IGNORE_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
@@ -15,7 +19,7 @@ pub struct HttpResponse {
     pub body: String,
     pub headers: Vec<(String, String)>,
     pub status_code: u8,
-    pub duration: f32
+    pub duration: f32,
 }
 
 #[derive(Debug)]
@@ -35,7 +39,7 @@ fn parse_response(inp: Response, duration: f32) -> HttpResponse {
         headers,
         status_code: inp.status() as u8,
         body: inp.into_string().unwrap(),
-        duration
+        duration,
     }
 }
 
@@ -49,7 +53,12 @@ impl HttpReq {
             .replace("HTTP/2", "HTTP/1.1")
     }
 
-    fn internal_request(&self, path: &str, agent: &Agent, req_counter: &mut u32) -> Option<(Response, f32)> {
+    fn internal_request(
+        &self,
+        path: &str,
+        agent: &Agent,
+        req_counter: &mut u32,
+    ) -> Option<(Response, f32)> {
         let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(&path) {
             return None;
@@ -63,8 +72,10 @@ impl HttpReq {
             Err(err) => match err {
                 ureq::Error::Status(_, resp) => Some((resp, duration)),
                 _ => {
-                    println!("Err: {}", err);
-                    println!("    - {}", path);
+                    if CONFIG.get().unwrap().verbose {
+                        println!("Err: {}", err);
+                        println!("    - {}", path);
+                    }
                     None
                 }
             },
@@ -72,7 +83,12 @@ impl HttpReq {
         }
     }
 
-    fn raw_request(&self, base_url: &str, agent: &Agent, req_counter: &mut u32) -> Option<HttpResponse> {
+    fn raw_request(
+        &self,
+        base_url: &str,
+        agent: &Agent,
+        req_counter: &mut u32,
+    ) -> Option<HttpResponse> {
         return None;
         // TODO: implement and handle better, needs more string replacements to work and such
         // e.g. {{Hostname}}
@@ -86,7 +102,7 @@ impl HttpReq {
         }
 
         let res = req.parse(baked_raw.as_bytes());
-        
+
         let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(&baked_raw) {
             return None;
@@ -103,8 +119,10 @@ impl HttpReq {
                         Err(err) => match err {
                             ureq::Error::Status(_, resp) => Some(parse_response(resp, duration)),
                             _ => {
-                                println!("Err: {}", err);
-                                println!("    - {}", req.path.unwrap());
+                                if CONFIG.get().unwrap().verbose {
+                                    println!("Err: {}", err);
+                                    println!("    - {}", req.path.unwrap());
+                                }
                                 None
                             }
                         },

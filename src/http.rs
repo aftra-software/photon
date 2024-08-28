@@ -1,4 +1,4 @@
-use std::sync::{Mutex, OnceLock};
+use std::{sync::{Mutex, OnceLock}, time::Instant};
 
 use regex::Regex;
 use ureq::{Agent, Response};
@@ -15,6 +15,7 @@ pub struct HttpResponse {
     pub body: String,
     pub headers: Vec<(String, String)>,
     pub status_code: u8,
+    pub duration: f32
 }
 
 #[derive(Debug)]
@@ -24,7 +25,7 @@ pub struct HttpReq {
     pub raw: String,
 }
 
-fn parse_response(inp: Response) -> HttpResponse {
+fn parse_response(inp: Response, duration: f32) -> HttpResponse {
     let headers: Vec<(String, String)> = inp
         .headers_names()
         .iter()
@@ -34,6 +35,7 @@ fn parse_response(inp: Response) -> HttpResponse {
         headers,
         status_code: inp.status() as u8,
         body: inp.into_string().unwrap(),
+        duration
     }
 }
 
@@ -47,27 +49,29 @@ impl HttpReq {
             .replace("HTTP/2", "HTTP/1.1")
     }
 
-    fn internal_request(&self, path: &str, agent: &Agent) -> Option<Response> {
+    fn internal_request(&self, path: &str, agent: &Agent, req_counter: &mut u32) -> Option<(Response, f32)> {
         let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(&path) {
             return None;
         }
 
+        *req_counter += 1;
+        let stopwatch = Instant::now();
         let res = agent.get(&path).call();
         match res {
             Err(err) => match err {
-                ureq::Error::Status(_, resp) => Some(resp),
+                ureq::Error::Status(_, resp) => Some((resp, stopwatch.elapsed().as_secs_f32())),
                 _ => {
                     println!("Err: {}", err);
                     println!("    - {}", path);
                     None
                 }
             },
-            Ok(resp) => Some(resp),
+            Ok(resp) => Some((resp, stopwatch.elapsed().as_secs_f32())),
         }
     }
 
-    fn raw_request(&self, base_url: &str, agent: &Agent) -> Option<HttpResponse> {
+    fn raw_request(&self, base_url: &str, agent: &Agent, req_counter: &mut u32) -> Option<HttpResponse> {
         return None;
         // TODO: implement and handle better, needs more string replacements to work and such
         // e.g. {{Hostname}}
@@ -90,17 +94,20 @@ impl HttpReq {
         match res {
             Ok(_) => {
                 if req.method.is_some() && req.path.is_some() {
+                    *req_counter += 1;
+                    let stopwatch = Instant::now();
                     let resp = agent.request(req.method.unwrap(), req.path.unwrap()).call();
+                    let duration = stopwatch.elapsed().as_secs_f32();
                     match resp {
                         Err(err) => match err {
-                            ureq::Error::Status(_, resp) => Some(parse_response(resp)),
+                            ureq::Error::Status(_, resp) => Some(parse_response(resp, duration)),
                             _ => {
                                 println!("Err: {}", err);
                                 println!("    - {}", req.path.unwrap());
                                 None
                             }
                         },
-                        Ok(resp) => Some(parse_response(resp)),
+                        Ok(resp) => Some(parse_response(resp, duration)),
                     }
                 } else {
                     None
@@ -123,17 +130,15 @@ impl HttpReq {
         }
 
         if !self.raw.is_empty() {
-            *req_counter += 1;
-            return self.raw_request(base_url, agent);
+            return self.raw_request(base_url, agent, req_counter);
         }
 
         // Skip caching below if we know the request is only happening once
         let unbaked_key = CacheKey(self.method, self.path.clone());
         if !cache.can_cache(&unbaked_key) {
-            *req_counter += 1;
-            let res = self.internal_request(&path, agent);
+            let res = self.internal_request(&path, agent, req_counter);
             if let Some(resp) = res {
-                return Some(parse_response(resp));
+                return Some(parse_response(resp.0, resp.1));
             } else {
                 return None;
             }
@@ -142,10 +147,9 @@ impl HttpReq {
         let key = CacheKey(self.method, path.clone());
 
         if !cache.contains(&key) {
-            *req_counter += 1;
-            let res = self.internal_request(&path, agent);
+            let res = self.internal_request(&path, agent, req_counter);
             if let Some(resp) = res {
-                cache.store(&key, Some(parse_response(resp)));
+                cache.store(&key, Some(parse_response(resp.0, resp.1)));
             } else {
                 cache.store(&key, None);
             }

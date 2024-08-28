@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::http::{HttpReq, HttpResponse};
-use regex::Regex;
+use regex::{Regex, RegexSet};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Severity {
@@ -14,30 +14,6 @@ pub enum Severity {
     Medium,
     High,
     Critical,
-}
-
-impl Severity {
-    pub fn to_string(&self) -> String {
-        match self {
-            Self::Critical => "critical".to_string(),
-            Self::High => "high".to_string(),
-            Self::Medium => "medium".to_string(),
-            Self::Low => "low".to_string(),
-            Self::Info => "info".to_string(),
-            Self::Unknown => "unknown".to_string(),
-        }
-    }
-
-    pub fn colored_string(&self) -> String {
-        match self {
-            Self::Critical => "\x1b[0;35mcritical\x1b[0m".to_string(),
-            Self::High => "\x1b[0;31mhigh\x1b[0m".to_string(),
-            Self::Medium => "\x1b[0;33mmedium\x1b[0m".to_string(),
-            Self::Low => "\x1b[0;90mlow\x1b[0m".to_string(),
-            Self::Info => "\x1b[0;36minfo\x1b[0m".to_string(),
-            Self::Unknown => "\x1b[0;90munknown\x1b[0m".to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -51,10 +27,16 @@ pub enum Method {
 }
 
 #[derive(Debug)]
+pub enum RegexType {
+    PatternList(Vec<Regex>),
+    Set(RegexSet),
+}
+
+#[derive(Debug)]
 pub enum MatcherType {
     Word(Vec<String>),
     DSL(Vec<String>),
-    Regex(Vec<String>),
+    Regex(RegexType),
     Status(Vec<u8>),
 }
 
@@ -91,13 +73,42 @@ pub struct Matcher {
     pub condition: Condition,
 }
 
-pub static REGEX_CACHE: OnceLock<Mutex<HashMap<String, Regex>>> = OnceLock::new();
+#[derive(Debug)]
+pub struct HttpRequest {
+    pub matchers: Vec<Matcher>,
+    pub matchers_condition: Condition,
+    pub path: Vec<HttpReq>,
+}
 
-fn get_or_init_regex<'a>(key: &String, cache: &'a mut HashMap<String, Regex>) -> &'a Regex {
-    if !cache.contains_key(key) {
-        cache.insert(key.clone(), Regex::new(key).unwrap());
+#[derive(Debug)]
+pub struct Template {
+    pub id: String,
+    pub info: Info,
+    pub http: Vec<HttpRequest>,
+}
+
+impl Severity {
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::Critical => "critical".to_string(),
+            Self::High => "high".to_string(),
+            Self::Medium => "medium".to_string(),
+            Self::Low => "low".to_string(),
+            Self::Info => "info".to_string(),
+            Self::Unknown => "unknown".to_string(),
+        }
     }
-    cache.get(key).unwrap()
+
+    pub fn colored_string(&self) -> String {
+        match self {
+            Self::Critical => "\x1b[0;35mcritical\x1b[0m".to_string(),
+            Self::High => "\x1b[0;31mhigh\x1b[0m".to_string(),
+            Self::Medium => "\x1b[0;33mmedium\x1b[0m".to_string(),
+            Self::Low => "\x1b[0;90mlow\x1b[0m".to_string(),
+            Self::Info => "\x1b[0;36minfo\x1b[0m".to_string(),
+            Self::Unknown => "\x1b[0;90munknown\x1b[0m".to_string(),
+        }
+    }
 }
 
 impl Matcher {
@@ -136,16 +147,11 @@ impl Matcher {
         match &self.r#type {
             MatcherType::DSL(_) => false,
             MatcherType::Regex(regexes) => {
-                let c = REGEX_CACHE.get().unwrap();
-                let mut cache = c.lock().unwrap();
-                if self.condition == Condition::OR {
-                    regexes
-                        .iter()
-                        .any(|pattern| get_or_init_regex(pattern, &mut cache).is_match(&data))
-                } else {
-                    regexes
-                        .iter()
-                        .all(|pattern| get_or_init_regex(pattern, &mut cache).is_match(&data))
+                match regexes {
+                    RegexType::PatternList(patterns) => patterns
+                    .iter()
+                    .all(|pattern| pattern.is_match(&data)),
+                    RegexType::Set(patterns) => patterns.is_match(&data)
                 }
             }
             MatcherType::Word(words) => {
@@ -166,16 +172,4 @@ impl Matcher {
     }
 }
 
-#[derive(Debug)]
-pub struct HttpRequest {
-    pub matchers: Vec<Matcher>,
-    pub matchers_condition: Condition,
-    pub path: Vec<HttpReq>,
-}
-
-#[derive(Debug)]
-pub struct Template {
-    pub id: String,
-    pub info: Info,
-    pub http: Vec<HttpRequest>,
-}
+impl Template {}

@@ -1,13 +1,13 @@
 use std::{fmt::Debug, fs};
 
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
     http::HttpReq,
     template::{
-        Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
-        Template,
+        Condition, HttpRequest, Info, Matcher, MatcherType, Method, RegexType, ResponsePart,
+        Severity, Template,
     },
 };
 
@@ -84,7 +84,7 @@ fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
     match matcher_type.to_lowercase().as_str() {
         "word" => Some(MatcherType::Word(vec![])),
         "dsl" => Some(MatcherType::DSL(vec![])),
-        "regex" => Some(MatcherType::Regex(vec![])),
+        "regex" => Some(MatcherType::Regex(RegexType::PatternList(vec![]))),
         "status" => Some(MatcherType::Status(vec![])),
         _ => None,
     }
@@ -209,20 +209,44 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
                 .collect();
             words.append(&mut words_strings);
         }
+        MatcherType::DSL(dsls) => {
+            let dsl_list = yaml["dsl"].as_vec();
+            if dsl_list.is_none() {
+                return Err(TemplateError::MissingField("dsl".into()));
+            }
+            let mut dsl_strings: Vec<String> = dsl_list
+                .unwrap()
+                .iter()
+                .map(|item| item.as_str().unwrap().to_string())
+                .collect();
+            dsls.append(&mut dsl_strings);
+        }
         MatcherType::Regex(regexes) => {
             let regex_list = yaml["regex"].as_vec();
             if regex_list.is_none() {
                 return Err(TemplateError::MissingField("regex".into()));
             }
-            let mut regex_strings: Vec<String> = regex_list
+            let regex_strings: Vec<String> = regex_list
                 .unwrap()
                 .iter()
                 .map(|item| item.as_str().unwrap().to_string())
                 .collect();
-            if regex_strings.iter().any(|patt| Regex::new(patt).is_err()) {
-                return Err(TemplateError::InvalidValue("Could not parse regex".into()));
+
+            let patterns: Vec<Result<Regex, _>> =
+                regex_strings.iter().map(|patt| Regex::new(patt)).collect();
+
+            if patterns.iter().any(|item| item.is_err()) {
+                let err = patterns.iter().find(|item| item.is_err()).cloned().unwrap();
+                return Err(TemplateError::InvalidValue(format!(
+                    "Could not parse regex, parse output: {}",
+                    err.unwrap_err()
+                )));
             }
-            regexes.append(&mut regex_strings);
+            if condition == Condition::OR {
+                *regexes = RegexType::Set(RegexSet::new(regex_strings).unwrap());
+            } else {
+                *regexes = RegexType::PatternList(patterns.iter().flatten().cloned().collect())
+            }
         }
         MatcherType::Status(statuses) => {
             let status_list = yaml["status"].as_vec();

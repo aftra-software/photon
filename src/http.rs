@@ -68,11 +68,20 @@ impl HttpReq {
     }
 
     fn raw_request(&self, base_url: &str, agent: &Agent) -> Option<HttpResponse> {
+        return None;
+        // TODO: implement and handle better, needs more string replacements to work and such
+        // e.g. {{Hostname}}
+        // Also need to send the actual raw request
         let mut headers = [httparse::EMPTY_HEADER; 32];
         let mut req = httparse::Request::new(&mut headers);
         let baked_raw = self.bake_raw(base_url);
-        let res = req.parse(baked_raw.as_bytes());
 
+        if !baked_raw.is_empty() && !baked_raw.contains(base_url) {
+            return None;
+        }
+
+        let res = req.parse(baked_raw.as_bytes());
+        
         let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(&baked_raw) {
             return None;

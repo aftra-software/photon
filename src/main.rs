@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Mutex, time::Instant};
 use cache::{Cache, CacheKey};
 use http::IGNORE_PATTERN;
 use regex::Regex;
-use template::{Condition, REGEX_CACHE};
+use template::Condition;
 use template_loader::load_template;
 use ureq::Agent;
 use walkdir::WalkDir;
@@ -25,7 +25,6 @@ struct Args {
 }
 
 fn main() {
-    let _ = REGEX_CACHE.set(Mutex::from(HashMap::new()));
     let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{.*}}").unwrap()));
 
     let args = Args::parse();

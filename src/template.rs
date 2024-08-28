@@ -1,5 +1,11 @@
-use crate::http::{HttpReq, HttpResponse};
+use std::collections::HashSet;
+
+use crate::{
+    cache::Cache,
+    http::{HttpReq, HttpResponse},
+};
 use regex::{Regex, RegexSet};
+use ureq::Agent;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Severity {
@@ -62,6 +68,7 @@ pub struct Info {
 #[derive(Debug)]
 pub struct Matcher {
     pub r#type: MatcherType,
+    pub name: Option<String>,
     pub negative: bool,
     pub internal: bool,
     pub part: ResponsePart,
@@ -80,6 +87,11 @@ pub struct Template {
     pub id: String,
     pub info: Info,
     pub http: Vec<HttpRequest>,
+}
+
+#[derive(Debug)]
+pub struct MatchResult {
+    pub name: String,
 }
 
 impl Severity {
@@ -165,4 +177,79 @@ impl Matcher {
     }
 }
 
-impl Template {}
+impl HttpRequest {
+    pub fn execute(
+        &self,
+        base_url: &str,
+        agent: &Agent,
+        req_counter: &mut u32,
+        cache: &mut Cache,
+    ) -> Vec<MatchResult> {
+        // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
+        let mut matched = false;
+        let mut matches = Vec::new();
+
+        for req in self.path.iter() {
+            let maybe_resp = req.do_request(base_url, agent, req_counter, cache);
+            if let Some(resp) = maybe_resp {
+                for matcher in self.matchers.iter() {
+                    if matcher.matches(&resp) {
+                        matches.push(MatchResult {
+                            name: matcher.name.clone().unwrap_or("".to_string()),
+                        });
+                    }
+                }
+            }
+
+            // Not the best logic, but should work?
+            match self.matchers_condition {
+                Condition::AND => {
+                    if matches.len() == self.matchers.len() {
+                        return matches;
+                    } else {
+                        // Clear because we want all matches to appear for 1 response
+                        matches.clear();
+                    }
+                }
+                Condition::OR => {
+                    if matches.len() > 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        matches
+    }
+}
+
+impl Template {
+    pub fn execute(&self, base_url: &str, agent: &Agent, req_counter: &mut u32, cache: &mut Cache) {
+        for http in self.http.iter() {
+            let match_results = http.execute(base_url, agent, req_counter, cache);
+            if match_results.len() > 0 {
+                let mut unique_names = HashSet::new();
+                for matched in match_results.iter() {
+                    unique_names.insert(matched.name.clone());
+                }
+
+                for name in unique_names {
+                    if name == "" {
+                        println!(
+                            "Matched: [{}] {}",
+                            self.info.severity.colored_string(),
+                            self.id
+                        );
+                    } else {
+                        println!(
+                            "Matched: [{}] {}:{}",
+                            self.info.severity.colored_string(),
+                            self.id,
+                            name
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

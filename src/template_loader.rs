@@ -164,6 +164,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
 pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
     let matcher_part = yaml["part"].as_str();
     let matcher_type = yaml["type"].as_str();
+    let matcher_name = yaml["name"].as_str();
     validate_fields(&[(matcher_type, "type")])?;
 
     let part = {
@@ -260,8 +261,12 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
                 .collect();
             statuses.append(&mut status_values);
         }
-        _ => return Err(TemplateError::Todo("Matcher Type".into())),
     }
+
+    let name = match matcher_name {
+        Some(name) => Some(name.to_string()),
+        None => None,
+    };
 
     Ok(Matcher {
         part,
@@ -269,6 +274,7 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
         r#type: matcher_type,
         negative,
         internal,
+        name,
     })
 }
 

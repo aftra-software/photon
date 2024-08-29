@@ -317,6 +317,7 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
 
     let matchers = matchers_parsed.into_iter().flatten().collect();
 
+    // TODO: make generic array/(string edge case) iterator thingy for these
     let mut requests = if yaml["path"].is_array() {
         yaml["path"]
             .as_vec()
@@ -364,11 +365,38 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
         vec![]
     };
 
+    let headers = if yaml["headers"].as_hash().is_some() {
+        if yaml["headers"]
+            .as_hash()
+            .unwrap()
+            .iter()
+            .any(|(key, value)| key.as_str().is_none() || value.as_str().is_none())
+        {
+            return Err(TemplateError::InvalidValue(
+                "Invalid headers key or value".into(),
+            ));
+        }
+        yaml["headers"]
+            .as_hash()
+            .unwrap()
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.as_str().unwrap().to_string(),
+                    value.as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
     requests.append(&mut raw);
 
     Ok(HttpRequest {
         matchers_condition,
         matchers,
+        headers,
         path: requests,
     })
 }

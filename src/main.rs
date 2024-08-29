@@ -102,45 +102,18 @@ fn main() {
     let mut stopwatch = Instant::now();
 
     let template_len = loaded_templates.len();
-
-    for (i, t) in loaded_templates.into_iter().enumerate() {
-        let mut skip = false;
-        for http in t.http {
-            if skip {
-                break;
-            }
-            for req in http.path {
-                if stopwatch.elapsed().as_secs_f32() > 20.0 {
-                    println!(
-                        "RPS: {}, Template: {}/{}, Requests: {}",
-                        (reqs - last_reqs) as f32 / stopwatch.elapsed().as_secs_f32(),
-                        i,
-                        template_len,
-                        reqs
-                    );
-                    last_reqs = reqs;
-                    stopwatch = Instant::now();
-                }
-                let resp = req.do_request(base_url, &request_agent, &mut reqs, &mut cache);
-                if let Some(body) = resp {
-                    let matches = if http.matchers_condition == Condition::OR {
-                        http.matchers
-                            .iter()
-                            .any(|matcher| matcher.matches(&body) && !matcher.internal)
-                    } else {
-                        http.matchers
-                            .iter()
-                            .all(|matcher| matcher.matches(&body) && !matcher.internal)
-                    };
-                    if matches {
-                        // TODO: Handle matching better with `http.matchers_condition`
-
-                        println!("Matched: [{}] {}", t.info.severity.colored_string(), t.id);
-                        skip = true;
-                        break;
-                    }
-                }
-            }
+    for (i, template) in loaded_templates.iter().enumerate() {
+        template.execute(base_url, &request_agent, &mut reqs, &mut cache);
+        if stopwatch.elapsed().as_secs_f32() > 20.0 {
+            println!(
+                "RPS: {}, Template: {}/{}, Requests: {}",
+                (reqs - last_reqs) as f32 / stopwatch.elapsed().as_secs_f32(),
+                i,
+                template_len,
+                reqs
+            );
+            last_reqs = reqs;
+            stopwatch = Instant::now();
         }
     }
 

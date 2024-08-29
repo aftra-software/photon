@@ -70,7 +70,7 @@ pub struct Matcher {
     pub r#type: MatcherType,
     pub name: Option<String>,
     pub negative: bool,
-    pub internal: bool,
+    pub internal: bool, // TODO: Figure out what this even is
     pub part: ResponsePart,
     pub condition: Condition,
 }
@@ -80,6 +80,7 @@ pub struct HttpRequest {
     pub matchers: Vec<Matcher>,
     pub matchers_condition: Condition,
     pub path: Vec<HttpReq>,
+    pub headers: Vec<(String, String)>, // TODO: use headers
 }
 
 #[derive(Debug)]
@@ -186,14 +187,14 @@ impl HttpRequest {
         cache: &mut Cache,
     ) -> Vec<MatchResult> {
         // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
-        let mut matched = false;
         let mut matches = Vec::new();
 
         for req in self.path.iter() {
             let maybe_resp = req.do_request(base_url, agent, req_counter, cache);
             if let Some(resp) = maybe_resp {
                 for matcher in self.matchers.iter() {
-                    if matcher.matches(&resp) {
+                    // Negative XOR matches
+                    if matcher.negative ^ matcher.matches(&resp) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
                         });
@@ -228,11 +229,14 @@ impl Template {
         for http in self.http.iter() {
             let match_results = http.execute(base_url, agent, req_counter, cache);
             if match_results.len() > 0 {
+                // Stupid string printing, for the cases where we have templates like
+                // missing-header:x-iframe-whatever
+                // missing-header:content-security-policy
+                // And want to display the different cases that were matched
                 let mut unique_names = HashSet::new();
                 for matched in match_results.iter() {
                     unique_names.insert(matched.name.clone());
                 }
-
                 for name in unique_names {
                     if name == "" {
                         println!(

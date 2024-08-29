@@ -70,7 +70,7 @@ pub struct Matcher {
     pub r#type: MatcherType,
     pub name: Option<String>,
     pub negative: bool,
-    pub internal: bool, // TODO: Figure out what this even is
+    pub internal: bool, // Used for workflows, matches, but does not print
     pub part: ResponsePart,
     pub condition: Condition,
 }
@@ -93,6 +93,7 @@ pub struct Template {
 #[derive(Debug)]
 pub struct MatchResult {
     pub name: String,
+    pub internal: bool
 }
 
 impl Severity {
@@ -197,6 +198,7 @@ impl HttpRequest {
                     if matcher.negative ^ matcher.matches(&resp) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
+                            internal: matcher.internal
                         });
                     }
                 }
@@ -235,7 +237,9 @@ impl Template {
                 // And want to display the different cases that were matched
                 let mut unique_names = HashSet::new();
                 for matched in match_results.iter() {
-                    unique_names.insert(matched.name.clone());
+                    if !matched.internal {
+                        unique_names.insert(matched.name.clone());
+                    }
                 }
                 for name in unique_names {
                     if name == "" {

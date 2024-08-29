@@ -161,7 +161,10 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     })
 }
 
-pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
+pub fn parse_matcher(
+    yaml: &Yaml,
+    matchers_condition: Condition,
+) -> Result<Option<Matcher>, TemplateError> {
     let matcher_part = yaml["part"].as_str();
     let matcher_type = yaml["type"].as_str();
     let matcher_name = yaml["name"].as_str();
@@ -173,7 +176,11 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
             None => Some(ResponsePart::Body),
         };
         if part_mat.is_none() {
-            return Err(TemplateError::InvalidValue("part".into()));
+            if matchers_condition == Condition::OR {
+                return Ok(None);
+            } else {
+                return Err(TemplateError::InvalidValue("part".into()));
+            }
         }
         part_mat.unwrap()
     };
@@ -268,14 +275,14 @@ pub fn parse_matcher(yaml: &Yaml) -> Result<Matcher, TemplateError> {
         None => None,
     };
 
-    Ok(Matcher {
+    Ok(Some(Matcher {
         part,
         condition,
         r#type: matcher_type,
         negative,
         internal,
         name,
-    })
+    }))
 }
 
 pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
@@ -305,7 +312,11 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
         }
     };
 
-    let matchers_parsed: Vec<_> = http_matchers.unwrap().iter().map(parse_matcher).collect();
+    let matchers_parsed: Vec<_> = http_matchers
+        .unwrap()
+        .iter()
+        .map(|item| parse_matcher(item, matchers_condition))
+        .collect();
 
     if matchers_parsed.iter().any(|item| item.is_err()) {
         return Err(matchers_parsed
@@ -315,7 +326,7 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
             .unwrap_err());
     }
 
-    let matchers = matchers_parsed.into_iter().flatten().collect();
+    let matchers = matchers_parsed.into_iter().flatten().flatten().collect();
 
     // TODO: make generic array/(string edge case) iterator thingy for these
     let mut requests = if yaml["path"].is_array() {

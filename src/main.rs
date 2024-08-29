@@ -27,6 +27,9 @@ struct Args {
 
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
+
+    #[arg(short, long, default_value_t = true)]
+    stats: bool,
 }
 
 struct Config {
@@ -104,7 +107,7 @@ fn main() {
     let template_len = loaded_templates.len();
     for (i, template) in loaded_templates.iter().enumerate() {
         template.execute(base_url, &request_agent, &mut reqs, &mut cache);
-        if stopwatch.elapsed().as_secs_f32() > 20.0 {
+        if args.stats && stopwatch.elapsed().as_secs_f32() > 20.0 {
             println!(
                 "RPS: {}, Template: {}/{}, Requests: {}",
                 (reqs - last_reqs) as f32 / stopwatch.elapsed().as_secs_f32(),

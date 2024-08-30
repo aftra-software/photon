@@ -93,7 +93,7 @@ pub struct Template {
 #[derive(Debug)]
 pub struct MatchResult {
     pub name: String,
-    pub internal: bool
+    pub internal: bool,
 }
 
 impl Severity {
@@ -198,7 +198,7 @@ impl HttpRequest {
                     if matcher.negative ^ matcher.matches(&resp) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
-                            internal: matcher.internal
+                            internal: matcher.internal,
                         });
                     }
                 }

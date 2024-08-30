@@ -1,14 +1,16 @@
-use std::{fmt::Debug, fs};
+use std::{collections::HashMap, fmt::Debug, fs};
 
 use regex::{Regex, RegexSet};
+use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
+    cache::{Cache, CacheKey},
     http::HttpReq,
     template::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, RegexType, ResponsePart,
         Severity, Template,
-    },
+    }, CONFIG,
 };
 
 #[derive(Debug)]
@@ -451,4 +453,68 @@ pub fn load_template(file: &str) -> Result<Template, TemplateError> {
         http,
         info,
     })
+}
+
+pub struct TemplateLoader {
+    pub loaded_templates: Vec<Template>,
+    pub cache: Cache,
+}
+
+impl TemplateLoader {
+    pub fn load_from_path(path: &str) -> Self {
+        let mut total = 0;
+        let mut success = 0;
+
+        let mut loaded_templates = Vec::new();
+
+        for entry_res in WalkDir::new(path) {
+            if let Ok(entry) = entry_res {
+                if entry.file_type().is_file()
+                    && entry.path().extension().is_some()
+                    && (entry.path().extension().unwrap() == "yml"
+                        || entry.path().extension().unwrap() == "yaml")
+                {
+                    let template = load_template(entry.path().to_str().unwrap());
+                    if template.is_ok() {
+                        success += 1;
+                        loaded_templates.push(template.unwrap());
+                    } else if CONFIG.get().unwrap().debug {
+                        println!("{:?} - {}", template, entry.path().to_str().unwrap());
+                    }
+                    total += 1;
+                }
+            }
+        }
+        if CONFIG.get().unwrap().debug {
+            println!(
+                "Successfully loaded template ratio: {}/{} - {:.2}%",
+                success,
+                total,
+                (success as f32 / total as f32) * 100.0
+            );
+        }
+
+        let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
+        for template in loaded_templates.iter() {
+            for http in template.http.iter() {
+                for request in http.path.iter() {
+                    tokens
+                        .entry(CacheKey(request.method, request.path.clone()))
+                        .and_modify(|val| *val += 1)
+                        .or_insert(1);
+                }
+            }
+        }
+        let keys: Vec<CacheKey> = tokens.keys().cloned().collect();
+        for key in keys {
+            if *tokens.get(&key).unwrap() == 1 {
+                tokens.remove(&key);
+            }
+        }
+        let cache = Cache::new(tokens);
+        Self {
+            cache,
+            loaded_templates
+        }
+    }
 }

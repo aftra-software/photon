@@ -11,7 +11,7 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::parse_tokens;
+use dsl::{build_ast, parse_tokens};
 use http::IGNORE_PATTERN;
 use regex::Regex;
 use template_loader::TemplateLoader;
@@ -59,6 +59,11 @@ fn main() {
         .collect();
     let tokens = parse_tokens(fs::read_to_string("test.dsl").unwrap(), functions);
     println!("Tokenizer output: {:?}", tokens);
+
+    if let Ok(toks) = tokens {
+        let ast = build_ast(&toks);
+        println!("AST output: {:?}", ast);
+    }
 
     let mut templates = TemplateLoader::load_from_path(&args.templates);
 

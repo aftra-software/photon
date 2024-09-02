@@ -1,20 +1,31 @@
-use std::io::BufReader;
+use core::panic;
 
 enum OPCode {
+    // Basic Operators
     LoadVar = 1,
     StoreVar = 2,
     LoadConstStr = 3,
     LoadConstInt = 4,   // 64 bit
     LoadConstFloat = 5, // 32 bit
-    CmpGt = 6,
-    CmpGtEq = 7,
-    CmpEq = 8,
-    CmpLtEq = 9,
-    CmpLt = 10,
+    CallFunc = 6,
+
+    // Comparison Operators
+    CmpGt = 7,
+    CmpGtEq = 8,
+    CmpEq = 9,
+    CmpNeq = 10,
+    CmpLtEq = 11,
+    CmpLt = 12,
+
+    // Binary Operators
+    Add = 13,
+    Sub = 14,
+    Mul = 15,
+    Div = 16,
 }
 
 #[derive(PartialEq, Eq, Debug)]
-enum TokenType {
+pub(crate) enum TokenType {
     Comparator,
     Numeric,
     Boolean,
@@ -32,8 +43,68 @@ enum TokenType {
     Unknown,
 }
 
+#[derive(Debug, Clone)]
+enum ComparatorOp {
+    Eq,
+    Neq,
+    Gt,
+    GtEq,
+    Lt,
+    LtEq,
+    RegexEq,
+    RegexNeq,
+    In,
+}
+
+fn map_comparator_op(op: &str) -> ComparatorOp {
+    match op {
+        "==" => ComparatorOp::Eq,
+        ">=" => ComparatorOp::GtEq,
+        ">" => ComparatorOp::Gt,
+        "<=" => ComparatorOp::LtEq,
+        "<" => ComparatorOp::Lt,
+        "!=" => ComparatorOp::Neq,
+        "=~" => ComparatorOp::RegexEq,
+        "!~" => ComparatorOp::RegexNeq,
+        "in" => ComparatorOp::In,
+        _ => panic!("Should be impossible??"),
+    }
+}
+
+#[derive(Debug, Clone)]
+enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Exp,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+}
+
+fn map_binary_op(op: &str) -> BinaryOp {
+    match op {
+        "+" => BinaryOp::Add,
+        "-" => BinaryOp::Sub,
+        "*" => BinaryOp::Mul,
+        "/" => BinaryOp::Div,
+        "%" => BinaryOp::Mod,
+        "**" => BinaryOp::Exp,
+        "&" => BinaryOp::And,
+        "|" => BinaryOp::Or,
+        "^" => BinaryOp::Xor,
+        "<<" => BinaryOp::Shl,
+        ">>" => BinaryOp::Shr,
+        _ => panic!("Should be impossible??"),
+    }
+}
+
 #[derive(Debug)]
-pub enum ParsingError {
+pub(crate) enum ParsingError {
     UnclosedString,
     UnclosedParameterBracket,
     InvalidHex,
@@ -44,16 +115,18 @@ pub enum ParsingError {
 }
 
 #[derive(Debug)]
-enum TokenValue {
+pub(crate) enum TokenValue {
     String(String),
     Char(char),
     Int(i64),
     Float(f32),
     Boolean(bool),
+    BinaryOp(BinaryOp),
+    ComparatorOp(ComparatorOp),
 }
 
 #[derive(Debug)]
-pub struct Token {
+pub(crate) struct Token {
     pub kind: TokenType,
     pub value: TokenValue,
 }
@@ -309,7 +382,7 @@ impl DSLParser {
                 "+" | "-" | "*" | "/" | "%" | "**" | "&" | "|" | "^" | "<<" | ">>" => {
                     return Ok(Token {
                         kind: TokenType::Modifier,
-                        value: TokenValue::String(token_str),
+                        value: TokenValue::BinaryOp(map_binary_op(&token_str)),
                     })
                 }
                 "&&" | "||" => {
@@ -321,7 +394,7 @@ impl DSLParser {
                 "==" | ">=" | ">" | "<=" | "<" | "!=" | "=~" | "!~" | "in" => {
                     return Ok(Token {
                         kind: TokenType::Comparator,
-                        value: TokenValue::String(token_str),
+                        value: TokenValue::ComparatorOp(map_comparator_op(&token_str)),
                     })
                 }
                 "?" | ":" | "??" => {
@@ -336,5 +409,90 @@ impl DSLParser {
             }
         }
         Err(ParsingError::UnexpectedEOS)
+    }
+}
+
+#[derive(Debug)]
+pub enum ASTNode {
+    Compare {
+        op: ComparatorOp,
+        left: Box<ASTNode>,
+        right: Box<ASTNode>,
+    },
+    Function {
+        name: String,
+        parameters: Vec<ASTNode>,
+    },
+    Constant {
+        value: TokenValue,
+    },
+    Variable {
+        name: String,
+    },
+    BinaryOperator {
+        op: BinaryOp,
+        left: Box<ASTNode>,
+        right: Box<ASTNode>,
+    },
+}
+
+fn match_clause(tokens: &[Token]) -> usize {
+    // Skip first one, we know its the opening clause
+    let mut counter = 1;
+    for (idx, token) in tokens.iter().skip(1).enumerate() {
+        if token.kind == TokenType::Clause {
+            counter += 1;
+        } else if token.kind == TokenType::ClauseClose {
+            counter -= 1;
+        }
+        if counter == 0 {
+            return idx + 1;
+        }
+    }
+    panic!("Could not find clause, fix!!!")
+}
+
+// Prebuild AST, group together clauses and such to make AST building much simpler
+pub fn prebuild_ast(tokens: &[Token]) {
+    //
+}
+
+pub fn build_ast(tokens: &[Token]) -> ASTNode {
+    // Handle e.g. (5 > 4)
+    let mut left = None;
+    let mut cur_idx = 0;
+
+    if tokens[cur_idx].kind == TokenType::Clause {
+        let clause_end = match_clause(tokens);
+        left = Some(build_ast(&tokens[cur_idx + 1..clause_end - 1]));
+        cur_idx = clause_end + 1;
+        if cur_idx == tokens.len() {
+            return left.unwrap();
+        }
+    } else if tokens[cur_idx].kind == TokenType::Function {
+        if tokens[cur_idx + 1].kind != TokenType::Clause {
+            panic!("function but no parenthesis");
+        }
+    }
+
+    if tokens[cur_idx].kind == TokenType::BinaryOp {
+        if left.is_none() {
+            panic!("fuck, left is none but we're doing an operation??? wtf");
+        }
+
+        let right = build_ast(&tokens[cur_idx + 1..]);
+        let op = match &tokens[cur_idx].value {
+            TokenValue::BinaryOp(op) => op.clone(),
+            _ => panic!("impossible"),
+        };
+        return ASTNode::BinaryOperator {
+            op,
+            left: Box::new(left.unwrap()),
+            right: Box::new(right),
+        };
+    }
+
+    ASTNode::Constant {
+        value: TokenValue::String("We don fucked up".into()),
     }
 }

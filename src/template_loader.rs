@@ -10,7 +10,8 @@ use crate::{
     template::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, RegexType, ResponsePart,
         Severity, Template,
-    }, CONFIG,
+    },
+    CONFIG,
 };
 
 #[derive(Debug)]
@@ -514,7 +515,7 @@ impl TemplateLoader {
         let cache = Cache::new(tokens);
         Self {
             cache,
-            loaded_templates
+            loaded_templates,
         }
     }
 }

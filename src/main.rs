@@ -1,19 +1,20 @@
+mod cache;
+mod dsl;
+mod http;
+mod template;
+mod template_loader;
+
 use std::{
     sync::{Mutex, OnceLock},
     time::Instant,
 };
 
+use clap::Parser;
+use dsl::parse_tokens;
 use http::IGNORE_PATTERN;
 use regex::Regex;
 use template_loader::TemplateLoader;
 use ureq::Agent;
-
-mod cache;
-mod http;
-mod template;
-mod template_loader;
-
-use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -48,8 +49,18 @@ fn main() {
 
     let _ = CONFIG.set(Config {
         verbose: args.verbose,
-        debug: args.debug
+        debug: args.debug,
     });
+
+    let functions = vec!["md5", "test_function"]
+        .iter()
+        .map(|item| item.to_string())
+        .collect();
+    let tokens = parse_tokens(
+        "md5(md5(\"test\")) != \"obviously wrong\"".to_string(),
+        functions,
+    );
+    println!("Tokenizer output: {:?}", tokens);
 
     let mut templates = TemplateLoader::load_from_path(&args.templates);
 

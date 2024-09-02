@@ -39,6 +39,7 @@ pub enum ParsingError {
     InvalidHex,
     InvalidDigit,
     UnexpectedEOS,
+    MismatchedParenthesis,
     UnknownSymbol(String)
 }
 
@@ -106,7 +107,11 @@ pub fn parse_tokens(input: String, known_functions: Vec<String>) -> Result<Vec<T
         // TODO: get next state from token and apply to DSLParser
     }
 
-    Ok(tokens)
+    if !validate_balance(&tokens) {
+        Err(ParsingError::MismatchedParenthesis)
+    } else {
+        Ok(tokens)
+    }
 }
 
 impl DSLParser {

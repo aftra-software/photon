@@ -5,6 +5,7 @@ mod template;
 mod template_loader;
 
 use std::{
+    fs,
     sync::{Mutex, OnceLock},
     time::Instant,
 };
@@ -56,10 +57,7 @@ fn main() {
         .iter()
         .map(|item| item.to_string())
         .collect();
-    let tokens = parse_tokens(
-        "(md5(md5(\"test\")) != \"obviously wrong\") && 5 > 4".to_string(),
-        functions,
-    );
+    let tokens = parse_tokens(fs::read_to_string("test.dsl").unwrap(), functions);
     println!("Tokenizer output: {:?}", tokens);
 
     let mut templates = TemplateLoader::load_from_path(&args.templates);

@@ -40,7 +40,7 @@ pub enum ParsingError {
     InvalidDigit,
     UnexpectedEOS,
     MismatchedParenthesis,
-    UnknownSymbol(String)
+    UnknownSymbol(String),
 }
 
 #[derive(Debug)]
@@ -88,7 +88,10 @@ fn is_variable_letter(chr: &char) -> bool {
     chr.is_alphanumeric() || *chr == '_' || *chr == '.'
 }
 
-pub fn parse_tokens(input: String, known_functions: Vec<String>) -> Result<Vec<Token>, ParsingError> {
+pub fn parse_tokens(
+    input: String,
+    known_functions: Vec<String>,
+) -> Result<Vec<Token>, ParsingError> {
     let mut parser = DSLParser {
         buffer: input,
         current: 0,
@@ -128,24 +131,37 @@ impl DSLParser {
         self.buffer.len() > self.current
     }
 
-    fn read_while<F>(&mut self, condition: F) -> (String, bool) 
-    where 
-        F: Fn(&char) -> bool
+    fn read_while<F>(&mut self, condition: F) -> (String, bool)
+    where
+        F: Fn(&char) -> bool,
     {
-        // TODO: Handle backspaces for escaping chars
-        // When backspace is reached, read the letter after backspace and ignore condition
         let mut str = String::new();
 
         let mut chr = self.advance();
         loop {
+            // End of stream
             if chr.is_none() {
                 return (str, false);
             }
-            if !condition(&chr.unwrap()) {
+
+            let c = chr.unwrap();
+            if c == '\\' {
+                chr = self.advance(); // Skip to next character
+                match chr {
+                    Some(ch) => str.push(ch),
+                    None => {
+                        return (str, false);
+                    }
+                }
+                chr = self.advance(); // Skip over escaped sequence and continue
+                continue;
+            }
+
+            if !condition(&c) {
                 self.rewind(1); // This character did not fulfil condition, so we step back
                 break;
             }
-            str.push(chr.unwrap());
+            str.push(c);
             chr = self.advance();
         }
 
@@ -163,7 +179,8 @@ impl DSLParser {
                     if let Some(next) = self.advance() {
                         if next == 'x' {
                             let (hex_str, _) = self.read_while(char::is_ascii_hexdigit);
-                            let hex_value = i64::from_str_radix(&hex_str, 16).map_err(|_| ParsingError::InvalidHex)?;
+                            let hex_value = i64::from_str_radix(&hex_str, 16)
+                                .map_err(|_| ParsingError::InvalidHex)?;
                             return Ok(Token {
                                 kind: TokenType::Numeric,
                                 value: TokenValue::Int(hex_value),
@@ -176,7 +193,9 @@ impl DSLParser {
                 self.rewind(1);
 
                 let (token_str, _) = self.read_while(|chr| chr.is_numeric());
-                let number = token_str.parse::<i64>().map_err(|_| ParsingError::InvalidDigit)?;
+                let number = token_str
+                    .parse::<i64>()
+                    .map_err(|_| ParsingError::InvalidDigit)?;
 
                 return Ok(Token {
                     kind: TokenType::Numeric,
@@ -265,12 +284,13 @@ impl DSLParser {
 
                 return Ok(Token {
                     kind: TokenType::String,
-                    value: TokenValue::String(token_str)
-                })
+                    value: TokenValue::String(token_str),
+                });
             }
 
             self.rewind(1);
-            let (token_str, _) = self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace());
+            let (token_str, _) =
+                self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace());
 
             // Handle prefix case, to differentiate between prefix and boolean operation
             if self.current_state.can_transition_to(TokenType::Prefix) {

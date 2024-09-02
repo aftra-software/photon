@@ -1,0 +1,1 @@
+(md5(md5("test")) != "obviously\" wrong") && 5 > 4

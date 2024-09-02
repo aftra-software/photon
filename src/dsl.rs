@@ -164,10 +164,11 @@ impl DSLParser {
                                 value: TokenValue::Int(hex_value),
                             });
                         } else {
-                            self.rewind(2); // were looking for 0x, so 2 back
+                            self.rewind(1); // were looking for 0x, so 2 back
                         }
                     }
                 }
+                self.rewind(1);
 
                 let (token_str, _) = self.read_while(|chr| chr.is_numeric());
                 let number = token_str.parse::<i64>().map_err(|_| ParsingError::InvalidDigit)?;
@@ -177,8 +178,6 @@ impl DSLParser {
                     value: TokenValue::Int(number),
                 });
             }
-
-            println!("chr: {}", chr);
 
             match chr {
                 ',' => {
@@ -238,8 +237,6 @@ impl DSLParser {
                     }
                     _ => {}
                 }
-
-                println!("maybe func: {}", token_str);
 
                 if self.known_functions.contains(&token_str) {
                     return Ok(Token {

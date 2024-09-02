@@ -57,7 +57,7 @@ fn main() {
         .map(|item| item.to_string())
         .collect();
     let tokens = parse_tokens(
-        "md5(md5(\"test\")) != \"obviously wrong\"".to_string(),
+        "(md5(md5(\"test\")) != \"obviously wrong\") && 5 > 4".to_string(),
         functions,
     );
     println!("Tokenizer output: {:?}", tokens);

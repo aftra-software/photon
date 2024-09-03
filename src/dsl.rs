@@ -155,7 +155,7 @@ pub(crate) enum ParsingError {
 impl Token {
     fn can_transition_to(&self, token: Token) -> bool {
         // TODO: grammar allowed transitions
-        return false;
+        false
     }
 }
 

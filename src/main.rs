@@ -53,7 +53,7 @@ fn main() {
         debug: args.debug,
     });
 
-    let functions = vec!["md5", "test_function"]
+    let functions = ["md5", "test_function"]
         .iter()
         .map(|item| item.to_string())
         .collect();

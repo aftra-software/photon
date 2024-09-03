@@ -60,13 +60,13 @@ impl HttpReq {
         req_counter: &mut u32,
     ) -> Option<(Response, f32)> {
         let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
-        if pattern.is_match(&path) {
+        if pattern.is_match(path) {
             return None;
         }
 
         *req_counter += 1;
         let stopwatch = Instant::now();
-        let res = agent.get(&path).call();
+        let res = agent.get(path).call();
         let duration = stopwatch.elapsed().as_secs_f32();
         match res {
             Err(err) => match err {
@@ -174,6 +174,6 @@ impl HttpReq {
             }
         }
 
-        return cache.get(&key, &unbaked_key);
+        cache.get(&key, &unbaked_key)
     }
 }

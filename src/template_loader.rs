@@ -273,10 +273,7 @@ pub fn parse_matcher(
         }
     }
 
-    let name = match matcher_name {
-        Some(name) => Some(name.to_string()),
-        None => None,
-    };
+    let name = matcher_name.map(|name| name.to_string());
 
     Ok(Some(Matcher {
         part,

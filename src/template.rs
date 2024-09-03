@@ -140,7 +140,7 @@ impl Matcher {
             ResponsePart::Header => data
                 .headers
                 .iter()
-                .map(|(k, v)| format!("{}: {}\n", k, v).into())
+                .map(|(k, v)| format!("{}: {}\n", k, v))
                 .collect::<Vec<String>>()
                 .concat(),
             ResponsePart::Raw => {
@@ -215,7 +215,7 @@ impl HttpRequest {
                     }
                 }
                 Condition::OR => {
-                    if matches.len() > 0 {
+                    if !matches.is_empty() {
                         break;
                     }
                 }
@@ -230,7 +230,7 @@ impl Template {
     pub fn execute(&self, base_url: &str, agent: &Agent, req_counter: &mut u32, cache: &mut Cache) {
         for http in self.http.iter() {
             let match_results = http.execute(base_url, agent, req_counter, cache);
-            if match_results.len() > 0 {
+            if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever
                 // missing-header:content-security-policy
@@ -242,7 +242,7 @@ impl Template {
                     }
                 }
                 for name in unique_names {
-                    if name == "" {
+                    if name.is_empty() {
                         println!(
                             "Matched: [{}] {}",
                             self.info.severity.colored_string(),

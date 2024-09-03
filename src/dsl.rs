@@ -24,27 +24,37 @@ enum OPCode {
     Div = 16,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum TokenValue {
+    String(String),
+    Char(char),
+    Int(i64),
+    Float(f32),
+    Boolean(bool),
+    Operator(Operator),
+}
+
 #[derive(PartialEq, Eq, Debug)]
-pub(crate) enum TokenType {
-    Comparator,
-    Numeric,
-    Boolean,
-    Variable,
-    String,
-    Function,
+pub(crate) enum Token {
+    Operator(Operator),
+    Numeric(i64), // TODO: support int and float?
+    Boolean(bool),
+    Variable(String),
+    String(String),
+    Function(String),
     Clause,
     ClauseClose,
-    Prefix,
-    Modifier,
-    Seperator, // Seperator between elements in a list (1, 2, 3)
-    LogicalOp, // || && etc
-    BinaryOp,  // ! ~ + - * etc
-    Ternary,
+    Prefix(char),
+    Modifier(String),
+    Seperator(char), // Seperator between elements in a list (1, 2, 3)
+    Ternary(String),
     Unknown,
 }
 
-#[derive(Debug, Clone)]
-enum ComparatorOp {
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Operator {
+    // Comparator Ops
     Eq,
     Neq,
     Gt,
@@ -53,52 +63,60 @@ enum ComparatorOp {
     LtEq,
     RegexEq,
     RegexNeq,
+    // Binary Ops
     In,
-}
-
-fn map_comparator_op(op: &str) -> ComparatorOp {
-    match op {
-        "==" => ComparatorOp::Eq,
-        ">=" => ComparatorOp::GtEq,
-        ">" => ComparatorOp::Gt,
-        "<=" => ComparatorOp::LtEq,
-        "<" => ComparatorOp::Lt,
-        "!=" => ComparatorOp::Neq,
-        "=~" => ComparatorOp::RegexEq,
-        "!~" => ComparatorOp::RegexNeq,
-        "in" => ComparatorOp::In,
-        _ => panic!("Should be impossible??"),
-    }
-}
-
-#[derive(Debug, Clone)]
-enum BinaryOp {
     Add,
     Sub,
     Mul,
     Div,
     Mod,
     Exp,
-    And,
-    Or,
+    BinaryAnd,
+    BinaryOr,
     Xor,
     Shl,
     Shr,
+    // Logical Ops
+    And,
+    Or
 }
 
-fn map_binary_op(op: &str) -> BinaryOp {
+fn map_logical_op(op: &str) -> Operator {
     match op {
-        "+" => BinaryOp::Add,
-        "-" => BinaryOp::Sub,
-        "*" => BinaryOp::Mul,
-        "/" => BinaryOp::Div,
-        "%" => BinaryOp::Mod,
-        "**" => BinaryOp::Exp,
-        "&" => BinaryOp::And,
-        "|" => BinaryOp::Or,
-        "^" => BinaryOp::Xor,
-        "<<" => BinaryOp::Shl,
-        ">>" => BinaryOp::Shr,
+        "&&" => Operator::And,
+        "||" => Operator::Or,
+        _ => panic!("Should be impossible??"),
+    }
+}
+
+fn map_comparator_op(op: &str) -> Operator {
+    match op {
+        "==" => Operator::Eq,
+        ">=" => Operator::GtEq,
+        ">" => Operator::Gt,
+        "<=" => Operator::LtEq,
+        "<" => Operator::Lt,
+        "!=" => Operator::Neq,
+        "=~" => Operator::RegexEq,
+        "!~" => Operator::RegexNeq,
+        "in" => Operator::In,
+        _ => panic!("Should be impossible??"),
+    }
+}
+
+fn map_binary_op(op: &str) -> Operator {
+    match op {
+        "+" => Operator::Add,
+        "-" => Operator::Sub,
+        "*" => Operator::Mul,
+        "/" => Operator::Div,
+        "%" => Operator::Mod,
+        "**" => Operator::Exp,
+        "&" => Operator::BinaryAnd,
+        "|" => Operator::BinaryOr,
+        "^" => Operator::Xor,
+        "<<" => Operator::Shl,
+        ">>" => Operator::Shr,
         _ => panic!("Should be impossible??"),
     }
 }
@@ -114,25 +132,8 @@ pub(crate) enum ParsingError {
     UnknownSymbol(String),
 }
 
-#[derive(Debug)]
-pub(crate) enum TokenValue {
-    String(String),
-    Char(char),
-    Int(i64),
-    Float(f32),
-    Boolean(bool),
-    BinaryOp(BinaryOp),
-    ComparatorOp(ComparatorOp),
-}
-
-#[derive(Debug)]
-pub(crate) struct Token {
-    pub kind: TokenType,
-    pub value: TokenValue,
-}
-
-impl TokenType {
-    fn can_transition_to(&self, token: TokenType) -> bool {
+impl Token {
+    fn can_transition_to(&self, token: Token) -> bool {
         // TODO: grammar allowed transitions
         return false;
     }
@@ -142,15 +143,15 @@ struct DSLParser {
     current: usize,
     buffer: String,
     known_functions: Vec<String>,
-    current_state: TokenType,
+    current_state: Token,
 }
 
 fn validate_balance(tokens: &[Token]) -> bool {
     let mut open = 0;
     for token in tokens {
-        if token.kind == TokenType::Clause {
+        if *token == Token::Clause {
             open += 1;
-        } else if token.kind == TokenType::ClauseClose {
+        } else if *token == Token::ClauseClose {
             open -= 1;
         }
     }
@@ -168,7 +169,7 @@ pub fn parse_tokens(
     let mut parser = DSLParser {
         buffer: input,
         current: 0,
-        current_state: TokenType::Unknown,
+        current_state: Token::Unknown,
         known_functions,
     };
 
@@ -254,10 +255,7 @@ impl DSLParser {
                             let (hex_str, _) = self.read_while(char::is_ascii_hexdigit);
                             let hex_value = i64::from_str_radix(&hex_str, 16)
                                 .map_err(|_| ParsingError::InvalidHex)?;
-                            return Ok(Token {
-                                kind: TokenType::Numeric,
-                                value: TokenValue::Int(hex_value),
-                            });
+                            return Ok(Token::Numeric(hex_value));
                         } else {
                             self.rewind(1); // were looking for 0x, so 2 back
                         }
@@ -270,30 +268,18 @@ impl DSLParser {
                     .parse::<i64>()
                     .map_err(|_| ParsingError::InvalidDigit)?;
 
-                return Ok(Token {
-                    kind: TokenType::Numeric,
-                    value: TokenValue::Int(number),
-                });
+                return Ok(Token::Numeric(number));
             }
 
             match chr {
                 ',' => {
-                    return Ok(Token {
-                        kind: TokenType::Seperator,
-                        value: TokenValue::Char(chr),
-                    });
+                    return Ok(Token::Seperator(chr));
                 }
                 '(' => {
-                    return Ok(Token {
-                        kind: TokenType::Clause,
-                        value: TokenValue::Char(chr),
-                    });
+                    return Ok(Token::Clause);
                 }
                 ')' => {
-                    return Ok(Token {
-                        kind: TokenType::ClauseClose,
-                        value: TokenValue::Char(chr),
-                    });
+                    return Ok(Token::ClauseClose);
                 }
                 _ => {}
             }
@@ -303,10 +289,7 @@ impl DSLParser {
                 if !finished {
                     return Err(ParsingError::UnclosedParameterBracket);
                 }
-                return Ok(Token {
-                    kind: TokenType::Variable,
-                    value: TokenValue::String(token_str),
-                });
+                return Ok(Token::Variable(token_str));
             }
 
             if is_variable_letter(&chr) {
@@ -315,31 +298,19 @@ impl DSLParser {
 
                 match token_str.as_str() {
                     "true" => {
-                        return Ok(Token {
-                            kind: TokenType::Boolean,
-                            value: TokenValue::Boolean(true),
-                        });
+                        return Ok(Token::Boolean(true));
                     }
                     "false" => {
-                        return Ok(Token {
-                            kind: TokenType::Boolean,
-                            value: TokenValue::Boolean(false),
-                        });
+                        return Ok(Token::Boolean(false));
                     }
                     "in" | "IN" => {
-                        return Ok(Token {
-                            kind: TokenType::Comparator,
-                            value: TokenValue::String("in".into()),
-                        })
+                        return Ok(Token::Operator(Operator::In))
                     }
                     _ => {}
                 }
 
                 if self.known_functions.contains(&token_str) {
-                    return Ok(Token {
-                        kind: TokenType::Function,
-                        value: TokenValue::String(token_str),
-                    });
+                    return Ok(Token::Function(token_str));
                 }
 
                 // TODO: Accessor? Not sure if it's needed so I'll skip for now.
@@ -355,10 +326,7 @@ impl DSLParser {
 
                 // TODO: time handling here
 
-                return Ok(Token {
-                    kind: TokenType::String,
-                    value: TokenValue::String(token_str),
-                });
+                return Ok(Token::String(token_str));
             }
 
             self.rewind(1);
@@ -366,13 +334,10 @@ impl DSLParser {
                 self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace());
 
             // Handle prefix case, to differentiate between prefix and boolean operation
-            if self.current_state.can_transition_to(TokenType::Prefix) {
+            if self.current_state.can_transition_to(Token::Prefix(token_str.chars().next().unwrap())) {
                 match token_str.as_str() {
                     "-" | "!" | "~" => {
-                        return Ok(Token {
-                            kind: TokenType::Prefix,
-                            value: TokenValue::String(token_str),
-                        })
+                        return Ok(Token::Prefix(token_str.chars().next().unwrap()));
                     }
                     _ => {}
                 }
@@ -380,28 +345,16 @@ impl DSLParser {
 
             match token_str.as_str() {
                 "+" | "-" | "*" | "/" | "%" | "**" | "&" | "|" | "^" | "<<" | ">>" => {
-                    return Ok(Token {
-                        kind: TokenType::Modifier,
-                        value: TokenValue::BinaryOp(map_binary_op(&token_str)),
-                    })
+                    return Ok(Token::Operator(map_binary_op(&token_str)));
                 }
                 "&&" | "||" => {
-                    return Ok(Token {
-                        kind: TokenType::LogicalOp,
-                        value: TokenValue::String(token_str),
-                    })
+                    return Ok(Token::Operator(map_logical_op(&token_str)));
                 }
                 "==" | ">=" | ">" | "<=" | "<" | "!=" | "=~" | "!~" | "in" => {
-                    return Ok(Token {
-                        kind: TokenType::Comparator,
-                        value: TokenValue::ComparatorOp(map_comparator_op(&token_str)),
-                    })
+                    return Ok(Token::Operator(map_comparator_op(&token_str)));
                 }
                 "?" | ":" | "??" => {
-                    return Ok(Token {
-                        kind: TokenType::Ternary,
-                        value: TokenValue::String(token_str),
-                    })
+                    return Ok(Token::Ternary(token_str));
                 }
                 _ => {
                     return Err(ParsingError::UnknownSymbol(token_str));
@@ -413,116 +366,155 @@ impl DSLParser {
 }
 
 #[derive(Debug)]
-pub enum ASTNode {
-    Compare {
-        op: ComparatorOp,
-        left: Box<ASTNode>,
-        right: Box<ASTNode>,
-    },
-    Function {
-        name: String,
-        parameters: Vec<ASTNode>,
-    },
-    Constant {
-        value: TokenValue,
-    },
-    Variable {
-        name: String,
-    },
-    BinaryOperator {
-        op: BinaryOp,
-        left: Box<ASTNode>,
-        right: Box<ASTNode>,
-    },
+pub enum Expr {
+    Operator(Box<Expr>, Operator, Box<Expr>),
+    Function(String, Vec<Expr>),
+    Constant(TokenValue),
+    Variable(String),
 }
+struct TokenStream<'a> {
+    tokens: &'a [Token],
+    position: usize,
+}
+
+impl<'a> TokenStream<'a> {
+    fn advance(&mut self) {
+        println!("eated: {:?}", self.tokens[self.position]);
+        self.position += 1;
+    }
+
+    fn current(&self) -> Option<&Token> {
+        self.tokens.get(self.position)
+    }
+}
+
 
 fn match_clause(tokens: &[Token]) -> usize {
     // Skip first one, we know its the opening clause
     let mut counter = 1;
     for (idx, token) in tokens.iter().skip(1).enumerate() {
-        println!("counter: {counter}");
-        if token.kind == TokenType::Clause {
+        if *token == Token::Clause {
             counter += 1;
-        } else if token.kind == TokenType::ClauseClose {
+        } else if *token == Token::ClauseClose {
             counter -= 1;
         }
         if counter == 0 {
             return idx + 1;
         }
     }
-    println!("{counter}");
     panic!("Could not find clause, fix!!!")
 }
 
-pub fn build_ast(tokens: &[Token]) -> ASTNode {
-    // Handle e.g. (5 > 4)
-    let mut left = None;
-    let mut cur_idx = 0;
+fn get_precedence(op: &Operator) -> u8 {
+    match op {
+        Operator::Or => 1,
+        Operator::And => 2,
+        Operator::BinaryOr => 3,
+        Operator::Xor => 4,
+        Operator::BinaryAnd => 5,
+        Operator::Eq | Operator::Neq | Operator::RegexEq | Operator::RegexNeq => 6,
+        Operator::Gt | Operator::GtEq | Operator::Lt | Operator::LtEq => 7,
+        Operator::Shl | Operator::Shr => 8,
+        Operator::Add | Operator::Sub => 9,
+        Operator::Mul | Operator::Div | Operator::Mod => 10,
+        Operator::Exp => 11,
+        Operator::In => 12
+    }
+}
 
-    if tokens[cur_idx].kind == TokenType::Clause {
-        println!("hi");
-        let clause_end = match_clause(tokens);
-        println!("matched clause: {:?}", &tokens[cur_idx..clause_end]);
-        left = Some(build_ast(&tokens[cur_idx + 1..clause_end]));
-        cur_idx = clause_end + 1;
-        if cur_idx == tokens.len() {
-            return left.unwrap();
-        }
-    } else if tokens[cur_idx].kind == TokenType::Function {
-        if tokens[cur_idx + 1].kind != TokenType::Clause {
-            panic!("function but no parenthesis");
+fn peek_operator(tokens: &TokenStream) -> Option<Operator> {
+    if let Some(Token::Operator(op)) = tokens.current() {
+        Some(op.clone())
+    } else {
+        None
+    }
+}
+
+pub fn parse_expr(tokens: &[Token]) -> Expr {
+    parse_expression(&mut TokenStream { tokens, position: 0 }, 0)
+}
+
+fn parse_expression(tokens: &mut TokenStream, min_precedence: u8) -> Expr {
+    let mut left = parse_primary(tokens);
+
+    while let Some(op) = peek_operator(tokens) {
+        let precedence = get_precedence(&op);
+        if precedence < min_precedence {
+            break;
         }
 
-        let mut splits = vec![cur_idx + 1];
-        let clause_end = match_clause(&tokens[cur_idx + 1..]);
-        println!("cur: {:?}", tokens[cur_idx]);
-        println!("matched: {:?}", &tokens[cur_idx + 1..clause_end + 1]);
-        let mut opens = 0; // Used to make sure we don't split on an inner parameter deeper in the tree
-        for tok_idx in (cur_idx + 1)..clause_end {
-            if tokens[tok_idx].kind == TokenType::Clause {
-                opens += 1;
-            } else if tokens[tok_idx].kind == TokenType::ClauseClose {
-                opens -= 1;
-            } else if opens == 0 && tokens[tok_idx].kind == TokenType::Seperator {
-                splits.push(tok_idx);
+        tokens.advance(); // Consume the operator
+        let next_min_precedence = precedence + 1;
+
+        let right = parse_expression(tokens, next_min_precedence);
+
+        left = Expr::Operator(Box::new(left), op, Box::new(right));
+    }
+
+    left
+}
+
+fn parse_primary(tokens: &mut TokenStream) -> Expr {
+    match tokens.current() {
+        Some(Token::Clause) => {
+            tokens.advance();
+            let expr = parse_expression(tokens, 0);
+
+            if let Some(Token::ClauseClose) = tokens.current() {
+                tokens.advance();
+            } else {
+                panic!("Expected closing parenthesis");
             }
-        }
-        splits.push(clause_end - 1);
 
-        let params = splits
-            .windows(2)
-            .map(|positions| build_ast(&tokens[positions[0]..positions[1] + 1]))
-            .collect();
+            expr
+        },
+        Some(Token::Boolean(value)) => {
+            let expr = Expr::Constant(TokenValue::Boolean(*value));
+            tokens.advance();
+            expr
+        },
+        Some(Token::Numeric(value)) => {
+            let expr = Expr::Constant(TokenValue::Int(*value));
+            tokens.advance();
+            expr
+        },
+        Some(Token::String(value)) => {
+            let expr = Expr::Constant(TokenValue::String(value.clone()));
+            tokens.advance();
+            expr
+        },
+        Some(Token::Function(func_name)) => {
+            let name = func_name.clone();
+            tokens.advance();
+            if let Some(Token::Clause) = tokens.current() {
+                tokens.advance(); // Consume the '('
 
-        let func_name = match &tokens[cur_idx].value {
-            TokenValue::String(name) => name.clone(),
-            _ => panic!("function has no name?"),
-        };
+                let mut args = Vec::new();
 
-        return ASTNode::Function {
-            name: func_name,
-            parameters: params,
-        };
-    }
+                if let Some(Token::ClauseClose) = tokens.current() {
+                    tokens.advance();
+                } else {
+                    loop {
+                        args.push(parse_expression(tokens, 0));
 
-    if tokens[cur_idx].kind == TokenType::BinaryOp {
-        if left.is_none() {
-            panic!("fuck, left is none but we're doing an operation??? wtf");
-        }
+                        match tokens.current() {
+                            Some(Token::Seperator(_)) => {
+                                tokens.advance();
+                            }
+                            Some(Token::ClauseClose) => {
+                                tokens.advance();
+                                break;
+                            }
+                            _ => panic!("Expected ',' or ')' after function argument"),
+                        }
+                    }
+                }
 
-        let right = build_ast(&tokens[cur_idx + 1..]);
-        let op = match &tokens[cur_idx].value {
-            TokenValue::BinaryOp(op) => op.clone(),
-            _ => panic!("impossible"),
-        };
-        return ASTNode::BinaryOperator {
-            op,
-            left: Box::new(left.unwrap()),
-            right: Box::new(right),
-        };
-    }
-
-    ASTNode::Constant {
-        value: TokenValue::String("We don fucked up".into()),
+                Expr::Function(name, args)
+            } else {
+                panic!("Expected opening parenthesis after function name");
+            }
+        },
+        _ => panic!("unexpected token")
     }
 }

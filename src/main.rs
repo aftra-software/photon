@@ -11,7 +11,7 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::{build_ast, parse_tokens};
+use dsl::{parse_expr, parse_tokens};
 use http::IGNORE_PATTERN;
 use regex::Regex;
 use template_loader::TemplateLoader;
@@ -61,7 +61,7 @@ fn main() {
     println!("Tokenizer output: {:?}", tokens);
 
     if let Ok(toks) = tokens {
-        let ast = build_ast(&toks);
+        let ast = parse_expr(&toks);
         println!("AST output: {:?}", ast);
     }
 

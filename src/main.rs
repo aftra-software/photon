@@ -11,7 +11,7 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::{parse_expr, parse_tokens};
+use dsl::{bytecode_to_binary, compile_bytecode, parse_expr, parse_tokens};
 use http::IGNORE_PATTERN;
 use regex::Regex;
 use template_loader::TemplateLoader;
@@ -63,6 +63,11 @@ fn main() {
     if let Ok(toks) = tokens {
         let ast = parse_expr(&toks);
         println!("AST output: {:?}", ast);
+        let bytecode = compile_bytecode(ast);
+        println!("Compiled expression: {:?}", bytecode);
+        if let Err(err) = fs::write("test.compiled", bytecode_to_binary(bytecode)) {
+            println!("Error writing bytecode: {}", err);
+        }
     }
 
     let mut templates = TemplateLoader::load_from_path(&args.templates);

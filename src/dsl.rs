@@ -1,37 +1,58 @@
 use core::panic;
 
-enum OPCode {
+#[derive(Debug)]
+pub enum OPCode {
     // Basic Operators
     LoadVar = 1,
     StoreVar = 2,
     LoadConstStr = 3,
     LoadConstInt = 4,   // 64 bit
     LoadConstFloat = 5, // 32 bit
-    CallFunc = 6,
+    LoadConstBool = 6,
+    CallFunc = 7,
 
     // Comparison Operators
-    CmpGt = 7,
-    CmpGtEq = 8,
-    CmpEq = 9,
-    CmpNeq = 10,
-    CmpLtEq = 11,
-    CmpLt = 12,
+    CmpGt = 8,
+    CmpGtEq = 9,
+    CmpEq = 10,
+    CmpNeq = 11,
+    CmpLtEq = 12,
+    CmpLt = 13,
 
     // Binary Operators
-    Add = 13,
-    Sub = 14,
-    Mul = 15,
-    Div = 16,
+    Add = 14,
+    Sub = 15,
+    Mul = 16,
+    Div = 17,
+    BinAnd = 18,
+    BinOr = 19,
+    Exp = 20,
+    Mod = 21,
+    Xor = 22,
+    Shl = 23,
+    Shr = 24,
+
+    // Logical Operators
+    And = 25,
+    Or = 26,
+    In = 27,
+
+    // Special Operators
+    RegEq = 28,
+    RegNeq = 29,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum TokenValue {
     String(String),
-    Char(char),
     Int(i64),
-    Float(f32),
     Boolean(bool),
-    Operator(Operator),
+}
+
+#[derive(Debug)]
+pub enum Bytecode {
+    Instr(OPCode),
+    Value(TokenValue)
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -45,7 +66,6 @@ pub(crate) enum Token {
     Clause,
     ClauseClose,
     Prefix(char),
-    Modifier(String),
     Seperator(char), // Seperator between elements in a list (1, 2, 3)
     Ternary(String),
     Unknown,
@@ -388,7 +408,6 @@ impl<'a> TokenStream<'a> {
     }
 }
 
-
 fn match_clause(tokens: &[Token]) -> usize {
     // Skip first one, we know its the opening clause
     let mut counter = 1;
@@ -483,6 +502,11 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
             tokens.advance();
             expr
         },
+        Some(Token::Variable(value)) => {
+            let expr = Expr::Variable(value.clone());
+            tokens.advance();
+            expr
+        },
         Some(Token::Function(func_name)) => {
             let name = func_name.clone();
             tokens.advance();
@@ -517,4 +541,102 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
         },
         _ => panic!("unexpected token")
     }
+}
+
+fn map_op(op: Operator) -> OPCode {
+    match op {
+        Operator::And => OPCode::And,
+        Operator::Or => OPCode::Or,
+        Operator::Add => OPCode::Add,
+        Operator::Eq => OPCode::CmpEq,
+        Operator::Neq => OPCode::CmpNeq,
+        Operator::Gt => OPCode::CmpGt,
+        Operator::GtEq => OPCode::CmpGtEq,
+        Operator::Lt => OPCode::CmpLt,
+        Operator::LtEq => OPCode::CmpLtEq,
+        Operator::In => OPCode::In, // TODO: Handle differently
+        Operator::BinaryAnd => OPCode::BinAnd,
+        Operator::BinaryOr => OPCode::BinOr,
+        Operator::Div => OPCode::Div,
+        Operator::Exp => OPCode::Exp,
+        Operator::Mod => OPCode::Mod,
+        Operator::Sub => OPCode::Sub,
+        Operator::Mul => OPCode::Mul,
+        Operator::Xor => OPCode::Xor,
+        Operator::Shl => OPCode::Shl,
+        Operator::Shr => OPCode::Shr,
+        Operator::RegexEq => OPCode::RegEq,
+        Operator::RegexNeq => OPCode::RegNeq,
+    }
+}
+
+pub fn compile_bytecode(expr: Expr) -> Vec<Bytecode> {
+    // For now we give everything left-presidence
+
+    match expr {
+        Expr::Operator(left, op, right) => {
+            let mut ops = Vec::new();
+            ops.append(&mut compile_bytecode(*left));
+            ops.append(&mut compile_bytecode(*right));
+            ops.push(Bytecode::Instr(map_op(op)));
+
+            ops
+        },
+        Expr::Function(name, variables) => {
+            let mut ops = Vec::new();
+            
+            for e in variables {
+                ops.append(&mut compile_bytecode(e));
+            }
+            ops.push(Bytecode::Instr(OPCode::CallFunc));
+            ops.push(Bytecode::Value(TokenValue::String(name)));
+
+            ops
+        },
+        Expr::Constant(value) => {
+            let op = match value {
+                TokenValue::Boolean(_) => {
+                    OPCode::LoadConstBool
+                },
+                TokenValue::String(_) => {
+                    OPCode::LoadConstStr
+                },
+                TokenValue::Int(_) => {
+                    OPCode::LoadConstInt
+                },
+                _ => panic!("Invalid constant, impossible")
+            };
+            vec![Bytecode::Instr(op), Bytecode::Value(value)]
+        },
+        Expr::Variable(value) => {
+            vec![Bytecode::Instr(OPCode::LoadVar), Bytecode::Value(TokenValue::String(value))]
+        }
+    }
+}
+
+pub fn bytecode_to_binary(bytecode: Vec<Bytecode>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for cur in bytecode {
+        match cur {
+            Bytecode::Instr(instr) => {
+                bytes.push(instr as u8);
+            },
+            Bytecode::Value(value) => {
+                match value {
+                    TokenValue::Boolean(value) => {
+                        bytes.push(value as u8);
+                    },
+                    TokenValue::Int(value) => {
+                        bytes.extend(value.to_be_bytes());
+                    },
+                    TokenValue::String(value) => {
+                        bytes.extend((value.len() as u16).to_be_bytes());
+                        bytes.extend(value.clone().bytes());
+                    }
+                }
+            }
+        }
+    }
+
+    bytes
 }

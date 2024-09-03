@@ -440,6 +440,7 @@ fn match_clause(tokens: &[Token]) -> usize {
     // Skip first one, we know its the opening clause
     let mut counter = 1;
     for (idx, token) in tokens.iter().skip(1).enumerate() {
+        println!("counter: {counter}");
         if token.kind == TokenType::Clause {
             counter += 1;
         } else if token.kind == TokenType::ClauseClose {
@@ -449,12 +450,8 @@ fn match_clause(tokens: &[Token]) -> usize {
             return idx + 1;
         }
     }
+    println!("{counter}");
     panic!("Could not find clause, fix!!!")
-}
-
-// Prebuild AST, group together clauses and such to make AST building much simpler
-pub fn prebuild_ast(tokens: &[Token]) {
-    //
 }
 
 pub fn build_ast(tokens: &[Token]) -> ASTNode {
@@ -463,8 +460,10 @@ pub fn build_ast(tokens: &[Token]) -> ASTNode {
     let mut cur_idx = 0;
 
     if tokens[cur_idx].kind == TokenType::Clause {
+        println!("hi");
         let clause_end = match_clause(tokens);
-        left = Some(build_ast(&tokens[cur_idx + 1..clause_end - 1]));
+        println!("matched clause: {:?}", &tokens[cur_idx..clause_end]);
+        left = Some(build_ast(&tokens[cur_idx + 1..clause_end]));
         cur_idx = clause_end + 1;
         if cur_idx == tokens.len() {
             return left.unwrap();
@@ -473,6 +472,37 @@ pub fn build_ast(tokens: &[Token]) -> ASTNode {
         if tokens[cur_idx + 1].kind != TokenType::Clause {
             panic!("function but no parenthesis");
         }
+
+        let mut splits = vec![cur_idx + 1];
+        let clause_end = match_clause(&tokens[cur_idx + 1..]);
+        println!("cur: {:?}", tokens[cur_idx]);
+        println!("matched: {:?}", &tokens[cur_idx + 1..clause_end + 1]);
+        let mut opens = 0; // Used to make sure we don't split on an inner parameter deeper in the tree
+        for tok_idx in (cur_idx + 1)..clause_end {
+            if tokens[tok_idx].kind == TokenType::Clause {
+                opens += 1;
+            } else if tokens[tok_idx].kind == TokenType::ClauseClose {
+                opens -= 1;
+            } else if opens == 0 && tokens[tok_idx].kind == TokenType::Seperator {
+                splits.push(tok_idx);
+            }
+        }
+        splits.push(clause_end - 1);
+
+        let params = splits
+            .windows(2)
+            .map(|positions| build_ast(&tokens[positions[0]..positions[1] + 1]))
+            .collect();
+
+        let func_name = match &tokens[cur_idx].value {
+            TokenValue::String(name) => name.clone(),
+            _ => panic!("function has no name?"),
+        };
+
+        return ASTNode::Function {
+            name: func_name,
+            parameters: params,
+        };
     }
 
     if tokens[cur_idx].kind == TokenType::BinaryOp {

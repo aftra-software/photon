@@ -1,6 +1,10 @@
 use core::panic;
+use std::{
+    collections::HashMap,
+    mem::{discriminant, Discriminant},
+};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum OPCode {
     // Basic Operators
     LoadVar = 1,
@@ -42,8 +46,8 @@ pub enum OPCode {
     RegNeq = 29,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum TokenValue {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Value {
     String(String),
     Int(i64),
     Boolean(bool),
@@ -52,8 +56,11 @@ pub(crate) enum TokenValue {
 #[derive(Debug)]
 pub enum Bytecode {
     Instr(OPCode),
-    Value(TokenValue)
+    Value(Value),
 }
+
+#[derive(Debug)]
+pub struct CompiledExpression(Vec<Bytecode>);
 
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) enum Token {
@@ -70,7 +77,6 @@ pub(crate) enum Token {
     Ternary(String),
     Unknown,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operator {
@@ -98,7 +104,7 @@ pub enum Operator {
     Shr,
     // Logical Ops
     And,
-    Or
+    Or,
 }
 
 fn map_logical_op(op: &str) -> Operator {
@@ -323,15 +329,15 @@ impl DSLParser {
                     "false" => {
                         return Ok(Token::Boolean(false));
                     }
-                    "in" | "IN" => {
-                        return Ok(Token::Operator(Operator::In))
-                    }
+                    "in" | "IN" => return Ok(Token::Operator(Operator::In)),
                     _ => {}
                 }
 
                 if self.known_functions.contains(&token_str) {
                     return Ok(Token::Function(token_str));
                 }
+
+                return Ok(Token::Variable(token_str));
 
                 // TODO: Accessor? Not sure if it's needed so I'll skip for now.
             }
@@ -354,7 +360,10 @@ impl DSLParser {
                 self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace());
 
             // Handle prefix case, to differentiate between prefix and boolean operation
-            if self.current_state.can_transition_to(Token::Prefix(token_str.chars().next().unwrap())) {
+            if self
+                .current_state
+                .can_transition_to(Token::Prefix(token_str.chars().next().unwrap()))
+            {
                 match token_str.as_str() {
                     "-" | "!" | "~" => {
                         return Ok(Token::Prefix(token_str.chars().next().unwrap()));
@@ -389,7 +398,7 @@ impl DSLParser {
 pub enum Expr {
     Operator(Box<Expr>, Operator, Box<Expr>),
     Function(String, Vec<Expr>),
-    Constant(TokenValue),
+    Constant(Value),
     Variable(String),
 }
 struct TokenStream<'a> {
@@ -399,29 +408,12 @@ struct TokenStream<'a> {
 
 impl<'a> TokenStream<'a> {
     fn advance(&mut self) {
-        println!("eated: {:?}", self.tokens[self.position]);
         self.position += 1;
     }
 
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
-}
-
-fn match_clause(tokens: &[Token]) -> usize {
-    // Skip first one, we know its the opening clause
-    let mut counter = 1;
-    for (idx, token) in tokens.iter().skip(1).enumerate() {
-        if *token == Token::Clause {
-            counter += 1;
-        } else if *token == Token::ClauseClose {
-            counter -= 1;
-        }
-        if counter == 0 {
-            return idx + 1;
-        }
-    }
-    panic!("Could not find clause, fix!!!")
 }
 
 fn get_precedence(op: &Operator) -> u8 {
@@ -437,7 +429,7 @@ fn get_precedence(op: &Operator) -> u8 {
         Operator::Add | Operator::Sub => 9,
         Operator::Mul | Operator::Div | Operator::Mod => 10,
         Operator::Exp => 11,
-        Operator::In => 12
+        Operator::In => 12,
     }
 }
 
@@ -450,7 +442,13 @@ fn peek_operator(tokens: &TokenStream) -> Option<Operator> {
 }
 
 pub fn parse_expr(tokens: &[Token]) -> Expr {
-    parse_expression(&mut TokenStream { tokens, position: 0 }, 0)
+    parse_expression(
+        &mut TokenStream {
+            tokens,
+            position: 0,
+        },
+        0,
+    )
 }
 
 fn parse_expression(tokens: &mut TokenStream, min_precedence: u8) -> Expr {
@@ -486,27 +484,27 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
             }
 
             expr
-        },
+        }
         Some(Token::Boolean(value)) => {
-            let expr = Expr::Constant(TokenValue::Boolean(*value));
+            let expr = Expr::Constant(Value::Boolean(*value));
             tokens.advance();
             expr
-        },
+        }
         Some(Token::Numeric(value)) => {
-            let expr = Expr::Constant(TokenValue::Int(*value));
+            let expr = Expr::Constant(Value::Int(*value));
             tokens.advance();
             expr
-        },
+        }
         Some(Token::String(value)) => {
-            let expr = Expr::Constant(TokenValue::String(value.clone()));
+            let expr = Expr::Constant(Value::String(value.clone()));
             tokens.advance();
             expr
-        },
+        }
         Some(Token::Variable(value)) => {
             let expr = Expr::Variable(value.clone());
             tokens.advance();
             expr
-        },
+        }
         Some(Token::Function(func_name)) => {
             let name = func_name.clone();
             tokens.advance();
@@ -538,8 +536,8 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
             } else {
                 panic!("Expected opening parenthesis after function name");
             }
-        },
-        _ => panic!("unexpected token")
+        }
+        _ => panic!("unexpected token"),
     }
 }
 
@@ -570,73 +568,267 @@ fn map_op(op: Operator) -> OPCode {
     }
 }
 
-pub fn compile_bytecode(expr: Expr) -> Vec<Bytecode> {
+pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
     // For now we give everything left-presidence
 
     match expr {
         Expr::Operator(left, op, right) => {
             let mut ops = Vec::new();
-            ops.append(&mut compile_bytecode(*left));
-            ops.append(&mut compile_bytecode(*right));
+            ops.append(&mut compile_bytecode(*left).0);
+            ops.append(&mut compile_bytecode(*right).0);
             ops.push(Bytecode::Instr(map_op(op)));
 
-            ops
-        },
+            CompiledExpression(ops)
+        }
         Expr::Function(name, variables) => {
             let mut ops = Vec::new();
-            
+
             for e in variables {
-                ops.append(&mut compile_bytecode(e));
+                ops.append(&mut compile_bytecode(e).0);
             }
             ops.push(Bytecode::Instr(OPCode::CallFunc));
-            ops.push(Bytecode::Value(TokenValue::String(name)));
+            ops.push(Bytecode::Value(Value::String(name)));
 
-            ops
-        },
+            CompiledExpression(ops)
+        }
         Expr::Constant(value) => {
             let op = match value {
-                TokenValue::Boolean(_) => {
-                    OPCode::LoadConstBool
-                },
-                TokenValue::String(_) => {
-                    OPCode::LoadConstStr
-                },
-                TokenValue::Int(_) => {
-                    OPCode::LoadConstInt
-                },
-                _ => panic!("Invalid constant, impossible")
+                Value::Boolean(_) => OPCode::LoadConstBool,
+                Value::String(_) => OPCode::LoadConstStr,
+                Value::Int(_) => OPCode::LoadConstInt,
             };
-            vec![Bytecode::Instr(op), Bytecode::Value(value)]
-        },
-        Expr::Variable(value) => {
-            vec![Bytecode::Instr(OPCode::LoadVar), Bytecode::Value(TokenValue::String(value))]
+            CompiledExpression(vec![Bytecode::Instr(op), Bytecode::Value(value)])
         }
+        Expr::Variable(value) => CompiledExpression(vec![
+            Bytecode::Instr(OPCode::LoadVar),
+            Bytecode::Value(Value::String(value)),
+        ]),
     }
 }
 
-pub fn bytecode_to_binary(bytecode: Vec<Bytecode>) -> Vec<u8> {
+pub fn bytecode_to_binary(bytecode: &CompiledExpression) -> Vec<u8> {
     let mut bytes = Vec::new();
-    for cur in bytecode {
+    for cur in &bytecode.0 {
         match cur {
             Bytecode::Instr(instr) => {
-                bytes.push(instr as u8);
-            },
-            Bytecode::Value(value) => {
-                match value {
-                    TokenValue::Boolean(value) => {
-                        bytes.push(value as u8);
-                    },
-                    TokenValue::Int(value) => {
-                        bytes.extend(value.to_be_bytes());
-                    },
-                    TokenValue::String(value) => {
-                        bytes.extend((value.len() as u16).to_be_bytes());
-                        bytes.extend(value.clone().bytes());
-                    }
-                }
+                bytes.push(*instr as u8);
             }
+            Bytecode::Value(value) => match value {
+                Value::Boolean(value) => {
+                    bytes.push(*value as u8);
+                }
+                Value::Int(value) => {
+                    bytes.extend(value.to_be_bytes());
+                }
+                Value::String(value) => {
+                    bytes.extend((value.len() as u16).to_be_bytes());
+                    bytes.extend(value.clone().bytes());
+                }
+            },
         }
     }
 
     bytes
+}
+
+pub struct DSLStack {
+    inner: Vec<Value>,
+}
+
+impl DSLStack {
+    fn new() -> Self {
+        DSLStack { inner: Vec::new() }
+    }
+
+    pub fn push(&mut self, val: Value) {
+        self.inner.push(val);
+    }
+
+    pub fn pop(&mut self) -> Result<Value, ()> {
+        if let Some(val) = self.inner.pop() {
+            Ok(val)
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn pop_int(&mut self) -> Result<i64, ()> {
+        match self.pop()? {
+            Value::Int(i) => Ok(i),
+            _ => Err(()),
+        }
+    }
+
+    pub fn pop_bool(&mut self) -> Result<bool, ()> {
+        match self.pop()? {
+            Value::Boolean(b) => Ok(b),
+            _ => Err(()),
+        }
+    }
+
+    pub fn pop_string(&mut self) -> Result<String, ()> {
+        match self.pop()? {
+            Value::String(s) => Ok(s),
+            _ => Err(()),
+        }
+    }
+}
+
+fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
+    match op {
+        OPCode::Add => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Int(a + b));
+            Ok(())
+        }
+        OPCode::CmpEq => {
+            let b = stack.pop()?;
+            let a = stack.pop()?;
+            stack.push(Value::Boolean(a == b));
+            Ok(())
+        }
+        OPCode::CmpNeq => {
+            let b = stack.pop()?;
+            let a = stack.pop()?;
+            stack.push(Value::Boolean(a != b));
+            println!("neq: {:?} != {:?} = {}", a, b, a != b);
+            Ok(())
+        }
+        OPCode::CmpGt => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Boolean(a > b));
+            println!("gt: {} > {} = {}", a, b, a > b);
+            Ok(())
+        }
+        OPCode::CmpGtEq => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Boolean(a >= b));
+            Ok(())
+        }
+        OPCode::CmpLt => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Boolean(a < b));
+            Ok(())
+        }
+        OPCode::CmpLtEq => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Boolean(a <= b));
+            Ok(())
+        }
+        OPCode::And => {
+            let b = stack.pop_bool()?;
+            let a = stack.pop_bool()?;
+            stack.push(Value::Boolean(a && b));
+            Ok(())
+        }
+        OPCode::Or => {
+            let b = stack.pop_bool()?;
+            let a = stack.pop_bool()?;
+            stack.push(Value::Boolean(a || b));
+            Ok(())
+        }
+        _ => panic!("TODO: implement OP {:?}", op),
+    }
+}
+
+fn execute_bytecode<F>(
+    compiled: &CompiledExpression,
+    variables: HashMap<String, Value>,
+    functions: HashMap<String, F>,
+) -> Result<Value, ()>
+where
+    F: Fn(&mut DSLStack) -> Result<(),()>,
+{
+    let mut stack = DSLStack::new();
+    let bytecode = &compiled.0;
+
+    let mut ptr = 0;
+    while ptr < bytecode.len() {
+        match &bytecode[ptr] {
+            Bytecode::Instr(OPCode::CallFunc) => {
+                ptr += 1;
+                if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
+                    if !functions.contains_key(key) {
+                        println!("Variable not found: {:?}", key);
+                        return Err(());
+                    }
+                    functions.get(key).unwrap()(&mut stack)?;
+                } else {
+                    println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
+                    return Err(());
+                }
+            },
+            Bytecode::Instr(OPCode::LoadVar) => {
+                ptr += 1;
+                if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
+                    if !variables.contains_key(key) {
+                        println!("Variable not found: {:?}", key);
+                        return Err(());
+                    }
+                    stack.push(variables.get(key).unwrap().clone());
+                } else {
+                    println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
+                    return Err(());
+                }
+            },
+            Bytecode::Instr(OPCode::LoadConstBool) => {
+                ptr += 1;
+                if let Bytecode::Value(Value::Boolean(val)) = &bytecode[ptr] {
+                    stack.push(Value::Boolean(*val));
+                } else {
+                    println!("LoadConstBool called with invalid argument: {:?}", &bytecode[ptr]);
+                    return Err(());
+                }
+            },
+            Bytecode::Instr(OPCode::LoadConstInt) => {
+                ptr += 1;
+                if let Bytecode::Value(Value::Int(val)) = &bytecode[ptr] {
+                    stack.push(Value::Int(*val));
+                } else {
+                    println!("LoadConstInt called with invalid argument: {:?}", &bytecode[ptr]);
+                    return Err(());
+                }
+            },
+            Bytecode::Instr(OPCode::LoadConstStr) => {
+                ptr += 1;
+                if let Bytecode::Value(Value::String(val)) = &bytecode[ptr] {
+                    stack.push(Value::String(val.clone()));
+                } else {
+                    println!("LoadConstStr called with invalid argument: {:?}", &bytecode[ptr]);
+                    return Err(());
+                }
+            },
+            Bytecode::Instr(op) => {
+                let res = handle_op(*op, &mut stack);
+                if res.is_err() {
+                    return Err(res.unwrap_err());
+                }
+            }
+            Bytecode::Value(_) => {
+                println!("Unexpected value while executing bytecode");
+                return Err(());
+            }
+        }
+        ptr += 1;
+    }
+
+    stack.pop()
+}
+
+impl CompiledExpression {
+    pub fn execute<F>(
+        &self,
+        variables: HashMap<String, Value>,
+        functions: HashMap<String, F>,
+    ) -> Result<Value, ()>
+    where
+        F: Fn(&mut DSLStack) -> Result<(),()>,
+    {
+        execute_bytecode(self, variables, functions)
+    }
 }

@@ -12,8 +12,10 @@ opt-level = 3
 codegen-units = 1
 
 [dependencies]
+base16ct = { version = "0.2.0", features = ["alloc"] }
 clap = { version = "4.5.16", features = ["derive"] }
 httparse = "1.9.4"
+md-5 = "0.10.6"
 regex = "1.10.6"
 ureq = "2.10.1"
 walkdir = "2.5.0"

@@ -153,8 +153,8 @@ impl HttpReq {
         }
 
         // Skip caching below if we know the request is only happening once
-        let unbaked_key = CacheKey(self.method, self.path.clone());
-        if !cache.can_cache(&unbaked_key) {
+        let key = CacheKey(self.method, self.path.clone());
+        if !cache.can_cache(&key) {
             let res = self.internal_request(&path, agent, req_counter);
             if let Some(resp) = res {
                 return Some(parse_response(resp.0, resp.1));
@@ -162,8 +162,6 @@ impl HttpReq {
                 return None;
             }
         }
-
-        let key = CacheKey(self.method, path.clone());
 
         if !cache.contains(&key) {
             let res = self.internal_request(&path, agent, req_counter);
@@ -174,6 +172,6 @@ impl HttpReq {
             }
         }
 
-        cache.get(&key, &unbaked_key)
+        cache.get(&key)
     }
 }

@@ -5,14 +5,16 @@ mod template;
 mod template_loader;
 
 use std::{
+    collections::HashMap,
     fs,
     sync::{Mutex, OnceLock},
     time::Instant,
 };
 
 use clap::Parser;
-use dsl::{bytecode_to_binary, compile_bytecode, parse_expr, parse_tokens};
+use dsl::{bytecode_to_binary, compile_bytecode, parse_expr, parse_tokens, DSLStack, Value};
 use http::IGNORE_PATTERN;
+use md5::{Digest, Md5};
 use regex::Regex;
 use template_loader::TemplateLoader;
 use ureq::Agent;
@@ -53,21 +55,37 @@ fn main() {
         debug: args.debug,
     });
 
+    let now = Instant::now();
     let functions = ["md5", "test_function"]
         .iter()
         .map(|item| item.to_string())
         .collect();
     let tokens = parse_tokens(fs::read_to_string("test.dsl").unwrap(), functions);
-    println!("Tokenizer output: {:?}", tokens);
+    //println!("Tokenizer output: {:?}", tokens);
 
     if let Ok(toks) = tokens {
         let ast = parse_expr(&toks);
         println!("AST output: {:?}", ast);
+
         let bytecode = compile_bytecode(ast);
         println!("Compiled expression: {:?}", bytecode);
-        if let Err(err) = fs::write("test.compiled", bytecode_to_binary(bytecode)) {
+        println!(
+            "Took: {:.4} ms",
+            now.elapsed().as_nanos() as f64 / 1_000_000.0
+        );
+        if let Err(err) = fs::write("test.compiled", bytecode_to_binary(&bytecode)) {
             println!("Error writing bytecode: {}", err);
         }
+        let res = bytecode.execute(
+            HashMap::from([("input".into(), Value::String("Hello".into()))]),
+            HashMap::from([("md5".into(), |stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+                stack.push(Value::String(hash));
+                Ok(())
+            })]),
+        );
+        println!("Output from executed bytecode: {:?}", res);
     }
 
     let mut templates = TemplateLoader::load_from_path(&args.templates);

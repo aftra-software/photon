@@ -43,9 +43,9 @@ impl Cache {
         self.current_tokens = self.tokens.clone();
     }
 
-    pub fn get(&mut self, key: &CacheKey, unbaked: &CacheKey) -> Option<HttpResponse> {
+    pub fn get(&mut self, key: &CacheKey) -> Option<HttpResponse> {
         let ret = self.inner.get(key).unwrap().clone();
-        self.decrease_token(unbaked);
+        self.decrease_token(key);
         ret
     }
 

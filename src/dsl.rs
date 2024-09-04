@@ -442,13 +442,13 @@ fn peek_operator(tokens: &TokenStream) -> Option<Operator> {
 }
 
 pub fn parse_expr(tokens: &[Token]) -> Expr {
-    parse_expression(
+    optimize_expr(parse_expression(
         &mut TokenStream {
             tokens,
             position: 0,
         },
         0,
-    )
+    ))
 }
 
 fn parse_expression(tokens: &mut TokenStream, min_precedence: u8) -> Expr {
@@ -538,6 +538,81 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
             }
         }
         _ => panic!("unexpected token"),
+    }
+}
+
+fn optimize_expr(expr: Expr) -> Expr {
+    match expr {
+        Expr::Operator(left, op, right) => {
+            let optimized_left = optimize_expr(*left);
+            let optimized_right = optimize_expr(*right);
+
+            if op == Operator::And {
+                if let Expr::Constant(Value::Boolean(l_b)) = optimized_left {
+                    if l_b {
+                        return optimized_right;
+                    }
+                }
+                if let Expr::Constant(Value::Boolean(r_b)) = optimized_right {
+                    if r_b {
+                        return optimized_left;
+                    }
+                }
+            }
+            if op == Operator::Or {
+                if let Expr::Constant(Value::Boolean(l_b)) = optimized_left {
+                    if l_b {
+                        return Expr::Constant(Value::Boolean(true));
+                    }
+                }
+                if let Expr::Constant(Value::Boolean(r_b)) = optimized_right {
+                    if r_b {
+                        return Expr::Constant(Value::Boolean(true));
+                    }
+                }
+            }
+
+            if let Expr::Constant(l) = &optimized_left {
+                if let Expr::Constant(r) = &optimized_right {
+                    if op == Operator::Eq {
+                        return Expr::Constant(Value::Boolean(l == r));
+                    } 
+                    if op == Operator::Neq {
+                        return Expr::Constant(Value::Boolean(l != r));
+                    }
+
+                    // Integer optimizations
+                    if let Value::Int(l_i) = l {
+                        if let Value::Int(r_i) = r {
+                            return match op {
+                                Operator::Add => Expr::Constant(Value::Int(l_i + r_i)),
+                                Operator::Mul => Expr::Constant(Value::Int(l_i * r_i)),
+                                Operator::Div => Expr::Constant(Value::Int(l_i / r_i)),
+                                Operator::Gt => Expr::Constant(Value::Boolean(l_i > r_i)),
+                                Operator::GtEq => Expr::Constant(Value::Boolean(l_i >= r_i)),
+                                Operator::Lt => Expr::Constant(Value::Boolean(l_i < r_i)),
+                                Operator::LtEq => Expr::Constant(Value::Boolean(l_i <= r_i)),
+                                _ => Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
+                            }
+                        }
+                    }
+
+                    // Boolean optimizations
+                    if let Value::Boolean(l_b) = l {
+                        if let Value::Boolean(r_b) = r {
+                            return match op {
+                                Operator::And => Expr::Constant(Value::Boolean(*l_b && *r_b)),
+                                Operator::Or => Expr::Constant(Value::Boolean(*l_b || *r_b)),
+                                _ => Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
+        },
+        _ => expr
     }
 }
 

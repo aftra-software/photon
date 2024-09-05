@@ -788,6 +788,7 @@ fn optimize_expr(expr: Expr) -> Expr {
             name,
             args.into_iter().map(|arg| optimize_expr(arg)).collect(),
         ),
+        Expr::List(args) => Expr::List(args.into_iter().map(|arg| optimize_expr(arg)).collect()),
         _ => expr,
     }
 }

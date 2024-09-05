@@ -863,10 +863,11 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             // Push list elements onto stack in the opposite direction, last element first
             // Finally, we push the length of the List onto the stack
             let mut ops = Vec::new();
+            let count = args.len();
             for e in args.into_iter().rev() {
                 ops.append(&mut compile_bytecode(e).0);
             }
-            ops.push(Bytecode::Value(Value::Int(ops.len() as i64)));
+            ops.push(Bytecode::Value(Value::Int(count as i64)));
 
             CompiledExpression(ops)
         }

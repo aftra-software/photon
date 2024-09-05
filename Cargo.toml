@@ -15,7 +15,10 @@ codegen-units = 1
 base16ct = { version = "0.2.0", features = ["alloc"] }
 clap = { version = "4.5.16", features = ["derive"] }
 httparse = "1.9.4"
+lazy_static = "1.5.0"
 md-5 = "0.10.6"
+pest = "2.7.11"
+pest_derive = "2.7.11"
 regex = "1.10.6"
 ureq = "2.10.1"
 walkdir = "2.5.0"

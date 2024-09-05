@@ -3,6 +3,7 @@ mod dsl;
 mod http;
 mod template;
 mod template_loader;
+mod parser;
 
 use std::{
     collections::HashMap,
@@ -12,9 +13,10 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::{bytecode_to_binary, compile_bytecode, parse_expr, parse_tokens, DSLStack, Value};
+use dsl::{bytecode_to_binary, compile_bytecode, optimize_expr, DSLStack, Value};
 use http::IGNORE_PATTERN;
 use md5::{Digest, Md5};
+use parser::do_parsing;
 use regex::Regex;
 use template_loader::TemplateLoader;
 use ureq::Agent;
@@ -56,10 +58,42 @@ fn main() {
     });
 
     let now = Instant::now();
-    let functions = ["md5", "test_function"]
+    /*let functions = ["md5", "test_function"]
         .iter()
         .map(|item| item.to_string())
-        .collect();
+        .collect();*/
+
+    // NEW:
+    let res = do_parsing(&fs::read_to_string("test.dsl").unwrap());
+    println!("AST output: {:?}", res);
+
+    if let Ok(ast) = res {
+        let opt = optimize_expr(ast);
+        println!("AST output: {:?}", opt);
+        let bytecode = compile_bytecode(opt);
+        println!("Compiled expression: {:?}", bytecode);
+        println!(
+            "Took: {:.4} ms",
+            now.elapsed().as_nanos() as f64 / 1_000_000.0
+        );
+        if let Err(err) = fs::write("test.compiled", bytecode_to_binary(&bytecode)) {
+            println!("Error writing bytecode: {}", err);
+        }
+        let res = bytecode.execute(
+            HashMap::from([
+                ("input".into(), Value::String("Hello".into())),
+                ("test".into(), Value::Boolean(true))
+                ]),
+            HashMap::from([("md5".into(), |stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+                stack.push(Value::String(hash));
+                Ok(())
+            })]),
+        );
+        println!("Output from executed bytecode: {:?}", res);
+    }
+/* 
     let tokens = parse_tokens(fs::read_to_string("test.dsl").unwrap(), functions);
     println!("Tokenizer output: {:?}", tokens);
 
@@ -87,7 +121,7 @@ fn main() {
         );
         println!("Output from executed bytecode: {:?}", res);
     }
-
+*/
     let mut templates = TemplateLoader::load_from_path(&args.templates);
 
     let base_url = &args.url;

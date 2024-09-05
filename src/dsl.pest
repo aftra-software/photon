@@ -1,0 +1,58 @@
+// Pest Grammar
+WHITESPACE = _{ " " | "\t" | "\n" }
+
+alpha = @{ (ALPHABETIC)+ }
+digit = @{ ("0" ~ "x" ~ ('0'..'9' | 'a'..'f' | 'A'..'F')+) | ('0'..'9')+ }
+
+ident = @{ ("_" | "." | alpha | digit)+ }
+
+predefined =  { "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
+escape     = _{ "\\" ~ predefined }
+raw_string = _{ (!("\\" | "\"") ~ ANY)+ }
+string     =  { ("'" ~ (raw_string | escape)* ~ "'") | ("\"" ~ (raw_string | escape)* ~ "\"") }
+eoi        = _{ !ANY }
+
+init       = _{ SOI ~ primary ~ eoi }
+op         = _{ logicalop | comparator | modifier }
+value      = _{ prefix | digit | boolean | function | variable | string | list | clause }
+expr       = _{ value ~ (op ~ value)* }
+primary    = _{ ternary | expr }
+clause     =  { "(" ~ primary ~ ")" }
+list       =  { "(" ~ primary ~ ("," ~ primary)+ ~ ")" }
+boolean    =  { "true" | "false" }
+variable   =  { ident }
+modifier   = _{ add | sub | mul | div | mod | exp | bitand | bitor | xor | shl | shr }
+comparator = _{ eq | gteq | gt | lteq | lt | neq | regexeq | regexneq | in }
+logicalop  = _{ or | and }
+prefix     = _{ (not | bitnot | neg) ~ (digit | boolean | function | variable | clause) }
+ternary    =  { expr ~ "?" ~ expr ~ ":" ~ expr }
+function   =  { ident ~ (list | clause) }
+
+add    = { "+" }
+sub    = { "-" }
+mul    = { "*" }
+div    = { "/" }
+mod    = { "%" }
+exp    = { "**" }
+bitand = { "&" }
+bitor  = { "|" }
+xor    = { "^" }
+shl    = { "<<" }
+shr    = { ">>" }
+
+eq       = { "==" }
+gteq     = { ">=" }
+gt       = { ">" }
+lteq     = { "<=" }
+lt       = { "<" }
+neq      = { "!=" }
+regexeq  = { "=~" }
+regexneq = { "!~" }
+in       = { "in" }
+
+and = { "&&" }
+or  = { "||" }
+
+not    = { "!" }
+bitnot = { "~" }
+neg    = { "-" }

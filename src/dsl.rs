@@ -64,7 +64,7 @@ pub enum Bytecode {
 #[derive(Debug)]
 pub struct CompiledExpression(Vec<Bytecode>);
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub(crate) enum Token {
     Operator(Operator),
     Numeric(i64), // TODO: support int and float?
@@ -160,13 +160,117 @@ pub(crate) enum ParsingError {
     InvalidDigit,
     UnexpectedEOS,
     MismatchedParenthesis,
+    UnexpectedToken(String),
     UnknownSymbol(String),
 }
 
 impl Token {
-    fn can_transition_to(&self, token: Token) -> bool {
+    fn can_transition_to(&self, token: &Token) -> bool {
+        match self {
+            Token::Unknown => match token {
+                Token::Prefix(_)
+                | Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::Variable(_)
+                | Token::String(_)
+                | Token::Function(_)
+                | Token::Clause => true,
+                _ => false,
+            },
+            Token::Clause => match token {
+                Token::Prefix(_)
+                | Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::Variable(_)
+                | Token::String(_)
+                | Token::Function(_)
+                | Token::Clause
+                | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::ClauseClose => match token {
+                Token::Operator(_)
+                | Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::Variable(_)
+                | Token::String(_)
+                | Token::Function(_)
+                | Token::Ternary(_)
+                | Token::Clause
+                | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::Numeric(_) => match token {
+                Token::Operator(_)
+                | Token::Seperator(_)
+                | Token::Ternary(_)
+                | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::Boolean(_) => match token {
+                Token::Operator(_)
+                | Token::Seperator(_)
+                | Token::Ternary(_)
+                | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::String(_) => match token {
+                Token::Operator(_) | Token::Seperator(_) | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::Variable(_) => match token {
+                Token::Operator(_)
+                | Token::Seperator(_)
+                | Token::Ternary(_)
+                | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::Operator(_) => match token {
+                Token::Prefix(_)
+                | Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::Variable(_)
+                | Token::Function(_)
+                | Token::String(_)
+                | Token::Clause
+                | Token::ClauseClose => true,
+                _ => false,
+            },
+            Token::Prefix(_) => match token {
+                Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::Variable(_)
+                | Token::Function(_)
+                | Token::Clause => true,
+                _ => false,
+            },
+            Token::Ternary(_) => match token {
+                Token::Prefix(_)
+                | Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::String(_)
+                | Token::Variable(_)
+                | Token::Function(_)
+                | Token::Seperator(_)
+                | Token::Clause => true,
+                _ => false,
+            },
+            Token::Function(_) => match token {
+                Token::Clause => true,
+                _ => false,
+            },
+            Token::Seperator(_) => match token {
+                Token::Prefix(_)
+                | Token::Numeric(_)
+                | Token::Boolean(_)
+                | Token::String(_)
+                | Token::Variable(_)
+                | Token::Function(_)
+                | Token::Clause => true,
+                _ => false,
+            },
+        }
         // TODO: grammar allowed transitions
-        true
     }
 }
 
@@ -211,8 +315,15 @@ pub fn parse_tokens(
         if token.is_err() {
             return Err(token.unwrap_err());
         }
-        tokens.push(token.unwrap());
-        // TODO: get next state from token and apply to DSLParser
+        let tok = token.unwrap();
+        if !parser.current_state.can_transition_to(&tok) {
+            return Err(ParsingError::UnexpectedToken(format!(
+                "Unexpected token {:?} at index {}",
+                tok, parser.current
+            )));
+        }
+        parser.current_state = tok.clone();
+        tokens.push(tok);
     }
 
     if !validate_balance(&tokens) {
@@ -361,13 +472,14 @@ impl DSLParser {
             }
 
             self.rewind(1);
-            let (token_str, _) =
-                self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace() && *chr != '(' && *chr != ')');
+            let (token_str, _) = self.read_while(|chr| {
+                !chr.is_alphanumeric() && !chr.is_whitespace() && *chr != '(' && *chr != ')'
+            });
 
             // Handle prefix case, to differentiate between prefix and cmp operation (!= vs !)
             if self
                 .current_state
-                .can_transition_to(Token::Prefix(token_str.chars().next().unwrap()))
+                .can_transition_to(&Token::Prefix(token_str.chars().next().unwrap()))
             {
                 match token_str.as_str() {
                     "-" | "!" | "~" => {
@@ -645,16 +757,16 @@ fn optimize_expr(expr: Expr) -> Expr {
                     if op == Operator::Invert {
                         return Expr::Constant(Value::Boolean(!b));
                     }
-                },
+                }
                 Expr::Constant(Value::Int(i)) => {
                     if op == Operator::Invert {
                         return Expr::Constant(Value::Int(-i));
                     }
-                },
+                }
                 _ => {}
             }
             Expr::Prefix(op, Box::new(optimized))
-        } 
+        }
         Expr::Function(name, args) => Expr::Function(
             name,
             args.into_iter().map(|arg| optimize_expr(arg)).collect(),

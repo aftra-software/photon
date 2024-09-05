@@ -638,11 +638,27 @@ fn optimize_expr(expr: Expr) -> Expr {
 
             Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
         }
+        Expr::Prefix(op, expr) => {
+            let optimized = optimize_expr(*expr);
+            match optimized {
+                Expr::Constant(Value::Boolean(b)) => {
+                    if op == Operator::Invert {
+                        return Expr::Constant(Value::Boolean(!b));
+                    }
+                },
+                Expr::Constant(Value::Int(i)) => {
+                    if op == Operator::Invert {
+                        return Expr::Constant(Value::Int(-i));
+                    }
+                },
+                _ => {}
+            }
+            Expr::Prefix(op, Box::new(optimized))
+        } 
         Expr::Function(name, args) => Expr::Function(
             name,
             args.into_iter().map(|arg| optimize_expr(arg)).collect(),
         ),
-
         _ => expr,
     }
 }

@@ -1,8 +1,7 @@
 use core::panic;
-use std::{
-    collections::HashMap,
-    mem::{discriminant, Discriminant},
-};
+use std::collections::HashMap;
+
+use regex::Regex;
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -44,6 +43,9 @@ pub enum OPCode {
     // Special Operators
     RegEq = 28,
     RegNeq = 29,
+    Invert = 30, // Invert/Negate top bool/int on stack
+    BitwiseNot = 31,
+    ListContains = 32, // TODO: implement
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +107,9 @@ pub enum Operator {
     // Logical Ops
     And,
     Or,
+    //Special
+    Invert,
+    BitwiseNot
 }
 
 fn map_logical_op(op: &str) -> Operator {
@@ -400,6 +405,7 @@ pub enum Expr {
     Function(String, Vec<Expr>),
     Constant(Value),
     Variable(String),
+    Prefix(Operator, Box<Expr>)
 }
 struct TokenStream<'a> {
     tokens: &'a [Token],
@@ -429,7 +435,8 @@ fn get_precedence(op: &Operator) -> u8 {
         Operator::Add | Operator::Sub => 9,
         Operator::Mul | Operator::Div | Operator::Mod => 10,
         Operator::Exp => 11,
-        Operator::In => 12,
+        Operator::Invert | Operator::BitwiseNot => 12, // ! and - prefixes
+        Operator::In => 13,
     }
 }
 
@@ -484,6 +491,16 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
             }
 
             expr
+        }
+        Some(Token::Prefix(prefix)) => {
+            let op = match prefix {
+                '-' | '!' => Operator::Invert,
+                '~' => Operator::BitwiseNot,
+                _ => panic!("Impossible, got prefix {}, shouldn't be possible to have parsed that as a token", prefix)
+            };
+            tokens.advance();
+            let expr = parse_expression(tokens, 0);
+            Expr::Prefix(op, Box::new(expr))
         }
         Some(Token::Boolean(value)) => {
             let expr = Expr::Constant(Value::Boolean(*value));
@@ -576,7 +593,7 @@ fn optimize_expr(expr: Expr) -> Expr {
                 if let Expr::Constant(r) = &optimized_right {
                     if op == Operator::Eq {
                         return Expr::Constant(Value::Boolean(l == r));
-                    } 
+                    }
                     if op == Operator::Neq {
                         return Expr::Constant(Value::Boolean(l != r));
                     }
@@ -592,8 +609,12 @@ fn optimize_expr(expr: Expr) -> Expr {
                                 Operator::GtEq => Expr::Constant(Value::Boolean(l_i >= r_i)),
                                 Operator::Lt => Expr::Constant(Value::Boolean(l_i < r_i)),
                                 Operator::LtEq => Expr::Constant(Value::Boolean(l_i <= r_i)),
-                                _ => Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
-                            }
+                                _ => Expr::Operator(
+                                    Box::new(optimized_left),
+                                    op,
+                                    Box::new(optimized_right),
+                                ),
+                            };
                         }
                     }
 
@@ -603,16 +624,25 @@ fn optimize_expr(expr: Expr) -> Expr {
                             return match op {
                                 Operator::And => Expr::Constant(Value::Boolean(*l_b && *r_b)),
                                 Operator::Or => Expr::Constant(Value::Boolean(*l_b || *r_b)),
-                                _ => Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
-                            }
+                                _ => Expr::Operator(
+                                    Box::new(optimized_left),
+                                    op,
+                                    Box::new(optimized_right),
+                                ),
+                            };
                         }
                     }
                 }
             }
-            
+
             Expr::Operator(Box::new(optimized_left), op, Box::new(optimized_right))
-        },
-        _ => expr
+        }
+        Expr::Function(name, args) => Expr::Function(
+            name,
+            args.into_iter().map(|arg| optimize_expr(arg)).collect(),
+        ),
+
+        _ => expr,
     }
 }
 
@@ -640,6 +670,8 @@ fn map_op(op: Operator) -> OPCode {
         Operator::Shr => OPCode::Shr,
         Operator::RegexEq => OPCode::RegEq,
         Operator::RegexNeq => OPCode::RegNeq,
+        Operator::Invert => OPCode::Invert,
+        Operator::BitwiseNot => OPCode::BitwiseNot
     }
 }
 
@@ -674,10 +706,17 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             };
             CompiledExpression(vec![Bytecode::Instr(op), Bytecode::Value(value)])
         }
+        Expr::Prefix(op, expr) => {
+            let mut ops = Vec::new();
+            ops.append(&mut compile_bytecode(*expr).0);
+            ops.push(Bytecode::Instr(map_op(op)));
+
+            CompiledExpression(ops)
+        }
         Expr::Variable(value) => CompiledExpression(vec![
             Bytecode::Instr(OPCode::LoadVar),
             Bytecode::Value(Value::String(value)),
-        ]),
+        ])
     }
 }
 
@@ -757,24 +796,40 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             stack.push(Value::Int(a + b));
             Ok(())
         }
+        OPCode::Mul => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Int(a * b));
+            Ok(())
+        }
+        OPCode::Div => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Int(a / b));
+            Ok(())
+        }
         OPCode::CmpEq => {
             let b = stack.pop()?;
             let a = stack.pop()?;
             stack.push(Value::Boolean(a == b));
             Ok(())
         }
+        OPCode::Exp => {
+            let b = stack.pop_int()?;
+            let a = stack.pop_int()?;
+            stack.push(Value::Int(a.pow(b as u32)));
+            Ok(())
+        }
         OPCode::CmpNeq => {
             let b = stack.pop()?;
             let a = stack.pop()?;
             stack.push(Value::Boolean(a != b));
-            println!("neq: {:?} != {:?} = {}", a, b, a != b);
             Ok(())
         }
         OPCode::CmpGt => {
             let b = stack.pop_int()?;
             let a = stack.pop_int()?;
             stack.push(Value::Boolean(a > b));
-            println!("gt: {} > {} = {}", a, b, a > b);
             Ok(())
         }
         OPCode::CmpGtEq => {
@@ -795,6 +850,20 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             stack.push(Value::Boolean(a <= b));
             Ok(())
         }
+        OPCode::RegEq => {
+            let b = stack.pop_string()?;
+            let a = stack.pop_string()?;
+            let matched = Regex::new(&b).map_err(|_| ())?.is_match(&a);
+            stack.push(Value::Boolean(matched));
+            Ok(())
+        }
+        OPCode::RegNeq => {
+            let b = stack.pop_string()?;
+            let a = stack.pop_string()?;
+            let matched = Regex::new(&b).map_err(|_| ())?.is_match(&a);
+            stack.push(Value::Boolean(!matched));
+            Ok(())
+        }
         OPCode::And => {
             let b = stack.pop_bool()?;
             let a = stack.pop_bool()?;
@@ -807,6 +876,20 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             stack.push(Value::Boolean(a || b));
             Ok(())
         }
+        OPCode::Invert => {
+            let val = stack.pop()?;
+            match val {
+                Value::Int(i) => {
+                    stack.push(Value::Int(-i));
+                    Ok(())
+                }
+                Value::Boolean(b) => {
+                    stack.push(Value::Boolean(!b));
+                    Ok(())
+                }
+                _ => Err(()),
+            }
+        }
         _ => panic!("TODO: implement OP {:?}", op),
     }
 }
@@ -817,7 +900,7 @@ fn execute_bytecode<F>(
     functions: HashMap<String, F>,
 ) -> Result<Value, ()>
 where
-    F: Fn(&mut DSLStack) -> Result<(),()>,
+    F: Fn(&mut DSLStack) -> Result<(), ()>,
 {
     let mut stack = DSLStack::new();
     let bytecode = &compiled.0;
@@ -837,7 +920,7 @@ where
                     println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());
                 }
-            },
+            }
             Bytecode::Instr(OPCode::LoadVar) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
@@ -850,34 +933,43 @@ where
                     println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());
                 }
-            },
+            }
             Bytecode::Instr(OPCode::LoadConstBool) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::Boolean(val)) = &bytecode[ptr] {
                     stack.push(Value::Boolean(*val));
                 } else {
-                    println!("LoadConstBool called with invalid argument: {:?}", &bytecode[ptr]);
+                    println!(
+                        "LoadConstBool called with invalid argument: {:?}",
+                        &bytecode[ptr]
+                    );
                     return Err(());
                 }
-            },
+            }
             Bytecode::Instr(OPCode::LoadConstInt) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::Int(val)) = &bytecode[ptr] {
                     stack.push(Value::Int(*val));
                 } else {
-                    println!("LoadConstInt called with invalid argument: {:?}", &bytecode[ptr]);
+                    println!(
+                        "LoadConstInt called with invalid argument: {:?}",
+                        &bytecode[ptr]
+                    );
                     return Err(());
                 }
-            },
+            }
             Bytecode::Instr(OPCode::LoadConstStr) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(val)) = &bytecode[ptr] {
                     stack.push(Value::String(val.clone()));
                 } else {
-                    println!("LoadConstStr called with invalid argument: {:?}", &bytecode[ptr]);
+                    println!(
+                        "LoadConstStr called with invalid argument: {:?}",
+                        &bytecode[ptr]
+                    );
                     return Err(());
                 }
-            },
+            }
             Bytecode::Instr(op) => {
                 let res = handle_op(*op, &mut stack);
                 if res.is_err() {
@@ -902,7 +994,7 @@ impl CompiledExpression {
         functions: HashMap<String, F>,
     ) -> Result<Value, ()>
     where
-        F: Fn(&mut DSLStack) -> Result<(),()>,
+        F: Fn(&mut DSLStack) -> Result<(), ()>,
     {
         execute_bytecode(self, variables, functions)
     }

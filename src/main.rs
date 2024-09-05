@@ -61,7 +61,7 @@ fn main() {
         .map(|item| item.to_string())
         .collect();
     let tokens = parse_tokens(fs::read_to_string("test.dsl").unwrap(), functions);
-    //println!("Tokenizer output: {:?}", tokens);
+    println!("Tokenizer output: {:?}", tokens);
 
     if let Ok(toks) = tokens {
         let ast = parse_expr(&toks);

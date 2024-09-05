@@ -1,1 +1,1 @@
-(md5(md5(input)) != "obviously\" wrong") && (5 > 4) && 5 > 4 && 6 > 2 && 2 > 1
+(md5(md5(input)) != "obviously\" wrong") && !(5 < 4) && 5 > 4 && 6 > 2 && 2 > 1

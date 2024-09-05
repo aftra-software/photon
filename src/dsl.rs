@@ -166,7 +166,7 @@ pub(crate) enum ParsingError {
 impl Token {
     fn can_transition_to(&self, token: Token) -> bool {
         // TODO: grammar allowed transitions
-        false
+        true
     }
 }
 
@@ -362,9 +362,9 @@ impl DSLParser {
 
             self.rewind(1);
             let (token_str, _) =
-                self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace());
+                self.read_while(|chr| !chr.is_alphanumeric() && !chr.is_whitespace() && *chr != '(' && *chr != ')');
 
-            // Handle prefix case, to differentiate between prefix and boolean operation
+            // Handle prefix case, to differentiate between prefix and cmp operation (!= vs !)
             if self
                 .current_state
                 .can_transition_to(Token::Prefix(token_str.chars().next().unwrap()))
@@ -500,6 +500,7 @@ fn parse_primary(tokens: &mut TokenStream) -> Expr {
             };
             tokens.advance();
             let expr = parse_expression(tokens, 0);
+            println!("hi");
             Expr::Prefix(op, Box::new(expr))
         }
         Some(Token::Boolean(value)) => {

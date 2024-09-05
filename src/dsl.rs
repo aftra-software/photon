@@ -109,7 +109,7 @@ pub enum Operator {
     Or,
     //Special
     Invert,
-    BitwiseNot
+    BitwiseNot,
 }
 
 fn map_logical_op(op: &str) -> Operator {
@@ -405,7 +405,7 @@ pub enum Expr {
     Function(String, Vec<Expr>),
     Constant(Value),
     Variable(String),
-    Prefix(Operator, Box<Expr>)
+    Prefix(Operator, Box<Expr>),
 }
 struct TokenStream<'a> {
     tokens: &'a [Token],
@@ -671,7 +671,7 @@ fn map_op(op: Operator) -> OPCode {
         Operator::RegexEq => OPCode::RegEq,
         Operator::RegexNeq => OPCode::RegNeq,
         Operator::Invert => OPCode::Invert,
-        Operator::BitwiseNot => OPCode::BitwiseNot
+        Operator::BitwiseNot => OPCode::BitwiseNot,
     }
 }
 
@@ -716,7 +716,7 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
         Expr::Variable(value) => CompiledExpression(vec![
             Bytecode::Instr(OPCode::LoadVar),
             Bytecode::Value(Value::String(value)),
-        ])
+        ]),
     }
 }
 

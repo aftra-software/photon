@@ -867,6 +867,7 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             for e in args.into_iter().rev() {
                 ops.append(&mut compile_bytecode(e).0);
             }
+            ops.push(Bytecode::Instr(OPCode::LoadConstInt));
             ops.push(Bytecode::Value(Value::Int(count as i64)));
 
             CompiledExpression(ops)
@@ -1047,6 +1048,17 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
                 }
                 _ => Err(()),
             }
+        }
+        OPCode::In => {
+            let len = stack.pop_int()?;
+            let mut haystack = Vec::new();
+            for _ in 0..len {
+                haystack.push(stack.pop()?);
+            }
+            let needle = stack.pop()?;
+            stack.push(Value::Boolean(haystack.contains(&needle)));
+
+            Ok(())
         }
         _ => panic!("TODO: implement OP {:?}", op),
     }

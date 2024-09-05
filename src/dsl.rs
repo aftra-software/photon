@@ -270,7 +270,6 @@ impl Token {
                 _ => false,
             },
         }
-        // TODO: grammar allowed transitions
     }
 }
 
@@ -517,6 +516,7 @@ pub enum Expr {
     Function(String, Vec<Expr>),
     Constant(Value),
     Variable(String),
+    List(Vec<Expr>),
     Prefix(Operator, Box<Expr>),
 }
 struct TokenStream<'a> {
@@ -593,16 +593,33 @@ fn parse_expression(tokens: &mut TokenStream, min_precedence: u8) -> Expr {
 fn parse_primary(tokens: &mut TokenStream) -> Expr {
     match tokens.current() {
         Some(Token::Clause) => {
-            tokens.advance();
-            let expr = parse_expression(tokens, 0);
+            tokens.advance(); // Consume the '('
+
+            let mut args = Vec::new();
 
             if let Some(Token::ClauseClose) = tokens.current() {
                 tokens.advance();
             } else {
-                panic!("Expected closing parenthesis");
-            }
+                loop {
+                    args.push(parse_expression(tokens, 0));
 
-            expr
+                    match tokens.current() {
+                        Some(Token::Seperator(_)) => {
+                            tokens.advance();
+                        }
+                        Some(Token::ClauseClose) => {
+                            tokens.advance();
+                            break;
+                        }
+                        _ => panic!("Expected ',' or ')' after list argument"),
+                    }
+                }
+            }
+            if args.len() == 1 {
+                args.pop().unwrap()
+            } else {
+                Expr::List(args)
+            }
         }
         Some(Token::Prefix(prefix)) => {
             let op = match prefix {
@@ -839,6 +856,17 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             let mut ops = Vec::new();
             ops.append(&mut compile_bytecode(*expr).0);
             ops.push(Bytecode::Instr(map_op(op)));
+
+            CompiledExpression(ops)
+        }
+        Expr::List(args) => {
+            // Push list elements onto stack in the opposite direction, last element first
+            // Finally, we push the length of the List onto the stack
+            let mut ops = Vec::new();
+            for e in args.into_iter().rev() {
+                ops.append(&mut compile_bytecode(e).0);
+            }
+            ops.push(Bytecode::Value(Value::Int(ops.len() as i64)));
 
             CompiledExpression(ops)
         }

@@ -40,7 +40,9 @@ lazy_static::lazy_static! {
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
 	match primary.as_rule() {
 		Rule::clause => parse_expr(primary.into_inner()),
-		Rule::string => Expr::Constant(Value::String(primary.as_str().to_string())),
+		// TODO: Handle escaped letters better
+		Rule::string => Expr::Constant(Value::String(primary.as_str()[1..primary.as_str().len()-1].to_string())),
+		Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
 		Rule::variable => Expr::Variable(primary.as_str().to_string()),
 		Rule::digit => {
 			let num = primary.as_str();

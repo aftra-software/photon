@@ -10,8 +10,8 @@ pub enum OPCode {
     //StoreVar = 2,
     LoadConstStr = 3,
     LoadConstInt = 4,   // 64 bit
-    //LoadConstFloat = 5, // 32 bit
-    LoadConstBool = 6, // Split into two instructions, LoadConstBoolTrue, LoadConstBoolFalse, no reason to have (LoadConstBool, bool_value)
+    LoadConstBoolTrue = 5, 
+    LoadConstBoolFalse = 6,
     CallFunc = 7,
 
     // Comparison Operators
@@ -129,11 +129,7 @@ pub fn optimize_expr(expr: Expr) -> Expr {
                         return Expr::Constant(Value::Boolean(true));
                     }
                 }
-                if let Expr::Constant(Value::Boolean(r_b)) = optimized_right {
-                    if r_b {
-                        return Expr::Constant(Value::Boolean(true));
-                    }
-                }
+                // Only fold left side, since (func() || true) needs to evaluate func
             }
 
             if let Expr::Constant(l) = &optimized_left {
@@ -262,11 +258,12 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
 
             CompiledExpression(ops)
         }
+        Expr::Constant(Value::Boolean(val)) => CompiledExpression(vec![Bytecode::Instr(if val { OPCode::LoadConstBoolTrue } else { OPCode::LoadConstBoolFalse})]),
         Expr::Constant(value) => {
             let op = match value {
-                Value::Boolean(_) => OPCode::LoadConstBool,
                 Value::String(_) => OPCode::LoadConstStr,
                 Value::Int(_) => OPCode::LoadConstInt,
+                _ => unreachable!("not possible")
             };
             CompiledExpression(vec![Bytecode::Instr(op), Bytecode::Value(value)])
         }
@@ -367,6 +364,14 @@ impl DSLStack {
 
 fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
     match op {
+        OPCode::LoadConstBoolTrue => {
+            stack.push(Value::Boolean(true));
+            Ok(())
+        }
+        OPCode::LoadConstBoolFalse => {
+            stack.push(Value::Boolean(false));
+            Ok(())
+        }
         OPCode::Add => {
             let b = stack.pop_int()?;
             let a = stack.pop_int()?;
@@ -519,18 +524,6 @@ where
                     stack.push(variables.get(key).unwrap().clone());
                 } else {
                     println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
-                    return Err(());
-                }
-            }
-            Bytecode::Instr(OPCode::LoadConstBool) => {
-                ptr += 1;
-                if let Bytecode::Value(Value::Boolean(val)) = &bytecode[ptr] {
-                    stack.push(Value::Boolean(*val));
-                } else {
-                    println!(
-                        "LoadConstBool called with invalid argument: {:?}",
-                        &bytecode[ptr]
-                    );
                     return Err(());
                 }
             }

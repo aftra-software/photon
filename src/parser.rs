@@ -1,7 +1,8 @@
 use pest::{iterators::{Pair, Pairs}, pratt_parser::PrattParser, Parser};
 use pest_derive::Parser;
+use escape8259::unescape;
 
-use crate::dsl::{Expr, Operator, Value};
+use crate::dsl::{optimize_expr, Expr, Operator, Value};
 
 #[derive(Parser)]
 #[grammar = "dsl.pest"]
@@ -9,8 +10,8 @@ pub struct DSLParser;
 
 pub fn do_parsing(data: &str) -> Result<Expr, ()> {
 	let res = DSLParser::parse(Rule::init, data).map_err(|_| ())?;
-
-	Ok(parse_expr(res))
+	let expr = parse_expr(res);
+	Ok(optimize_expr(expr))
 }
 
 lazy_static::lazy_static! {
@@ -40,8 +41,7 @@ lazy_static::lazy_static! {
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
 	match primary.as_rule() {
 		Rule::clause => parse_expr(primary.into_inner()),
-		// TODO: Handle escaped letters better
-		Rule::string => Expr::Constant(Value::String(primary.as_str()[1..primary.as_str().len()-1].to_string())),
+		Rule::string => Expr::Constant(Value::String(unescape(primary.as_str()[1..primary.as_str().len()-1].to_string()).unwrap())),
 		Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
 		Rule::variable => Expr::Variable(primary.as_str().to_string()),
 		Rule::digit => {
@@ -52,8 +52,13 @@ fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
 				Expr::Constant(Value::Int(num.parse::<i64>().unwrap()))
 			}
 		},
-		Rule::list => {
-			Expr::List(primary.into_inner().map(|pair| parse_primary(pair)).collect())
+		Rule::list => Expr::List(primary.into_inner().map(|pair| parse_primary(pair)).collect()),
+		Rule::ternary => {
+			let mut inner = primary.into_inner();
+			let left = parse_primary(inner.next().unwrap());
+			let middle = parse_primary(inner.next().unwrap());
+			let right = parse_primary(inner.next().unwrap());
+			Expr::Ternary(Box::new(left), Box::new(middle), Box::new(right))
 		},
 		Rule::function => {
 			let mut iter = primary.into_inner();

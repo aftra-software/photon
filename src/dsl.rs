@@ -7,8 +7,8 @@ use regex::Regex;
 pub enum OPCode {
     // Basic Operators
     LoadVar = 1,
-    //StoreVar = 2,
-    LoadConstStr = 3,
+    LoadConstStr = 2,
+    LoadConstShort = 3, // 16 bit
     LoadConstInt = 4,   // 64 bit
     LoadConstBoolTrue = 5, 
     LoadConstBoolFalse = 6,
@@ -45,12 +45,16 @@ pub enum OPCode {
     RegNeq = 29,
     Invert = 30, // Invert/Negate top bool/int on stack
     BitwiseNot = 31,
+
+    // Branching Operators
+    ShortJump = 32, // pops bool off stack, if true jump forward by (-32768, 32767) instructions/values
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Value {
     String(String),
     Int(i64),
+    Short(i16),
     Boolean(bool),
 }
 
@@ -98,6 +102,7 @@ pub enum Operator {
 #[derive(Debug)]
 pub enum Expr {
     Operator(Box<Expr>, Operator, Box<Expr>),
+    Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
     Function(String, Vec<Expr>),
     Constant(Value),
     Variable(String),
@@ -258,6 +263,31 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
 
             CompiledExpression(ops)
         }
+        Expr::Ternary(left, middle, right) => {
+            let mut ops = Vec::new();
+
+            let mut middle = compile_bytecode(*middle).0;
+            let mut right = compile_bytecode(*right).0;
+
+            // Left expression so we end up with a boolean on top of the stack
+            ops.append(&mut compile_bytecode(*left).0);
+            ops.push(Bytecode::Instr(OPCode::Invert)); // Jump if false, so invert bool
+
+            // Jump over middle part
+            ops.push(Bytecode::Instr(OPCode::ShortJump));
+
+            // Jump over right part, if we take middle path
+            middle.push(Bytecode::Instr(OPCode::LoadConstBoolTrue)); // unconditional jump
+            middle.push(Bytecode::Instr(OPCode::ShortJump));
+            middle.push(Bytecode::Value(Value::Short(right.len() as i16)));
+
+            ops.push(Bytecode::Value(Value::Short(middle.len() as i16))); // + 3 to adjust for Jump out of middle
+            
+            ops.append(&mut middle);
+            ops.append(&mut right);
+
+            CompiledExpression(ops)
+        }
         Expr::Constant(Value::Boolean(val)) => CompiledExpression(vec![Bytecode::Instr(if val { OPCode::LoadConstBoolTrue } else { OPCode::LoadConstBoolFalse})]),
         Expr::Constant(value) => {
             let op = match value {
@@ -282,8 +312,8 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             for e in args.into_iter().rev() {
                 ops.append(&mut compile_bytecode(e).0);
             }
-            ops.push(Bytecode::Instr(OPCode::LoadConstInt));
-            ops.push(Bytecode::Value(Value::Int(count as i64)));
+            ops.push(Bytecode::Instr(OPCode::LoadConstShort));
+            ops.push(Bytecode::Value(Value::Short(count as i16)));
 
             CompiledExpression(ops)
         }
@@ -308,6 +338,9 @@ pub fn bytecode_to_binary(bytecode: &CompiledExpression) -> Vec<u8> {
                 Value::Int(value) => {
                     bytes.extend(value.to_be_bytes());
                 }
+                Value::Short(value) => {
+                    bytes.extend(value.to_be_bytes());
+                }
                 Value::String(value) => {
                     bytes.extend((value.len() as u16).to_be_bytes());
                     bytes.extend(value.clone().bytes());
@@ -323,6 +356,7 @@ pub struct DSLStack {
     inner: Vec<Value>,
 }
 
+// TODO: Proper error handling
 impl DSLStack {
     fn new() -> Self {
         DSLStack { inner: Vec::new() }
@@ -336,6 +370,7 @@ impl DSLStack {
         if let Some(val) = self.inner.pop() {
             Ok(val)
         } else {
+            println!("Attempted to pop an empty stack");
             Err(())
         }
     }
@@ -343,21 +378,40 @@ impl DSLStack {
     pub fn pop_int(&mut self) -> Result<i64, ()> {
         match self.pop()? {
             Value::Int(i) => Ok(i),
-            _ => Err(()),
+            other => {
+                println!("Attempted to pop an int but got {:?}", other);
+                Err(())
+            },
+        }
+    }
+
+    pub fn pop_short(&mut self) -> Result<i16, ()> {
+        match self.pop()? {
+            Value::Short(i) => Ok(i),
+            other => {
+                println!("Attempted to pop a short but got {:?}", other);
+                Err(())
+            },
         }
     }
 
     pub fn pop_bool(&mut self) -> Result<bool, ()> {
         match self.pop()? {
             Value::Boolean(b) => Ok(b),
-            _ => Err(()),
+            other => {
+                println!("Attempted to pop a bool but got {:?}", other);
+                Err(())
+            },
         }
     }
 
     pub fn pop_string(&mut self) -> Result<String, ()> {
         match self.pop()? {
             Value::String(s) => Ok(s),
-            _ => Err(()),
+            other => {
+                println!("Attempted to pop a string but got {:?}", other);
+                Err(())
+            },
         }
     }
 }
@@ -473,7 +527,7 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             }
         }
         OPCode::In => {
-            let len = stack.pop_int()?;
+            let len = stack.pop_short()?;
             let mut haystack = Vec::new();
             for _ in 0..len {
                 haystack.push(stack.pop()?);
@@ -537,6 +591,33 @@ where
                         &bytecode[ptr]
                     );
                     return Err(());
+                }
+            }
+            Bytecode::Instr(OPCode::LoadConstShort) => {
+                ptr += 1;
+                if let Bytecode::Value(Value::Short(val)) = &bytecode[ptr] {
+                    stack.push(Value::Short(*val));
+                } else {
+                    println!(
+                        "LoadConstInt called with invalid argument: {:?}",
+                        &bytecode[ptr]
+                    );
+                    return Err(());
+                }
+            }
+            Bytecode::Instr(OPCode::ShortJump) => {
+                ptr += 1;
+                let should_jump = stack.pop_bool()?;
+                if should_jump {
+                    if let Bytecode::Value(Value::Short(val)) = &bytecode[ptr] {
+                        ptr = (ptr as isize + *val as isize) as usize;
+                    } else {
+                        println!(
+                            "ShortJump called with invalid argument: {:?}",
+                            &bytecode[ptr]
+                        );
+                        return Err(());
+                    }
                 }
             }
             Bytecode::Instr(OPCode::LoadConstStr) => {

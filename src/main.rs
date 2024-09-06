@@ -27,8 +27,11 @@ struct Args {
     #[arg(short, long)]
     url: String,
 
-    #[arg(short, long, default_value_t = String::from("nuclei-templates"), action)]
+    #[arg(short, long, default_value_t = String::from("nuclei-templates"))]
     templates: String,
+
+    #[arg(long, default_value_t = String::from("test.dsl"))]
+    test: String,
 
     #[arg(short, long, default_value_t = false, action)]
     verbose: bool,
@@ -64,13 +67,11 @@ fn main() {
         .collect();*/
 
     // NEW:
-    let res = do_parsing(&fs::read_to_string("test.dsl").unwrap());
+    let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
     println!("AST output: {:?}", res);
 
     if let Ok(ast) = res {
-        let opt = optimize_expr(ast);
-        println!("AST output: {:?}", opt);
-        let bytecode = compile_bytecode(opt);
+        let bytecode = compile_bytecode(ast);
         println!("Compiled expression: {:?}", bytecode);
         println!(
             "Took: {:.4} ms",

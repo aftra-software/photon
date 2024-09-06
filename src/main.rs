@@ -61,10 +61,6 @@ fn main() {
     });
 
     let now = Instant::now();
-    /*let functions = ["md5", "test_function"]
-        .iter()
-        .map(|item| item.to_string())
-        .collect();*/
 
     // NEW:
     let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
@@ -94,35 +90,7 @@ fn main() {
         );
         println!("Output from executed bytecode: {:?}", res);
     }
-/* 
-    let tokens = parse_tokens(fs::read_to_string("test.dsl").unwrap(), functions);
-    println!("Tokenizer output: {:?}", tokens);
-
-    if let Ok(toks) = tokens {
-        let ast = parse_expr(&toks);
-        println!("AST output: {:?}", ast);
-
-        let bytecode = compile_bytecode(ast);
-        println!("Compiled expression: {:?}", bytecode);
-        println!(
-            "Took: {:.4} ms",
-            now.elapsed().as_nanos() as f64 / 1_000_000.0
-        );
-        if let Err(err) = fs::write("test.compiled", bytecode_to_binary(&bytecode)) {
-            println!("Error writing bytecode: {}", err);
-        }
-        let res = bytecode.execute(
-            HashMap::from([("input".into(), Value::String("Hello".into()))]),
-            HashMap::from([("md5".into(), |stack: &mut DSLStack| {
-                let inp = stack.pop_string()?;
-                let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-                stack.push(Value::String(hash));
-                Ok(())
-            })]),
-        );
-        println!("Output from executed bytecode: {:?}", res);
-    }
-*/
+    
     let mut templates = TemplateLoader::load_from_path(&args.templates);
 
     let base_url = &args.url;

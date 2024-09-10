@@ -61,9 +61,11 @@ fn my_unescape(s: &str) -> Result<String, ()> {
                     return Err(());
                 }
                 Some(d) => {
-                    out.push(d)
+                    out.push(d);
                 }
             }
+        } else {
+            out.push(c);
         }
     }
 

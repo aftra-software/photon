@@ -14,7 +14,6 @@ codegen-units = 1
 [dependencies]
 base16ct = { version = "0.2.0", features = ["alloc"] }
 clap = { version = "4.5.16", features = ["derive"] }
-escape8259 = "0.5.3"
 httparse = "1.9.4"
 lazy_static = "1.5.0"
 md-5 = "0.10.6"

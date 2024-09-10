@@ -1,4 +1,3 @@
-use escape8259::unescape;
 use pest::{
     iterators::{Pair, Pairs},
     pratt_parser::PrattParser,
@@ -50,9 +49,6 @@ lazy_static::lazy_static! {
         };
 }
 
-// TODO: take string
-// Any instance of \[anything] -> [anything]
-// actual backslashes come up as \\ either way
 fn my_unescape(s: &str) -> Result<String, ()> {
     let mut ins = s.chars();
     let mut out = String::with_capacity(s.len());

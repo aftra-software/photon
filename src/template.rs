@@ -210,6 +210,7 @@ impl HttpRequest {
             if let Some(resp) = maybe_resp {
                 ctx.variables.insert(format!("body_{}", idx+1), Value::String(resp.body.clone()));
                 ctx.variables.insert("body".to_string(), Value::String(resp.body.clone()));
+                ctx.variables.insert("status_code".to_string(), Value::Int(resp.status_code as i64));
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
                     if matcher.negative ^ matcher.matches(&resp, &ctx) {

@@ -7,7 +7,7 @@ edition = "2021"
 lto = "thin"
 #strip = true
 debug = true
-panic = "abort"
+#panic = "abort"
 opt-level = 3
 codegen-units = 1
 

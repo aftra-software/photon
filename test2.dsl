@@ -1,1 +1,1 @@
-(true ? (5 > 4) : (5 < 4)) ? "left" : "right"
+contains(body, 'errmsg0\": \"OK')

@@ -110,7 +110,7 @@ pub enum Expr {
     Prefix(Operator, Box<Expr>),
 }
 
-pub fn optimize_expr(expr: Expr) -> Expr {
+pub(crate) fn optimize_expr(expr: Expr) -> Expr {
     match expr {
         Expr::Operator(left, op, right) => {
             let optimized_left = optimize_expr(*left);

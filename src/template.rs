@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
     cache::Cache,
+    dsl::CompiledExpression,
     http::{HttpReq, HttpResponse},
 };
 use regex::{Regex, RegexSet};
@@ -36,7 +37,7 @@ pub enum RegexType {
 #[derive(Debug)]
 pub enum MatcherType {
     Word(Vec<String>),
-    DSL(Vec<String>),
+    DSL(Vec<CompiledExpression>),
     Regex(RegexType),
     Status(Vec<u8>),
 }

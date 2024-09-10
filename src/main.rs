@@ -13,7 +13,7 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::{bytecode_to_binary, compile_bytecode, optimize_expr, DSLStack, Value};
+use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value};
 use http::IGNORE_PATTERN;
 use md5::{Digest, Md5};
 use parser::do_parsing;

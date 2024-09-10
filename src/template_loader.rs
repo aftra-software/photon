@@ -6,7 +6,9 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
     cache::{Cache, CacheKey},
+    dsl::{compile_bytecode, Bytecode, CompiledExpression},
     http::HttpReq,
+    parser::compile_expression,
     template::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, RegexType, ResponsePart,
         Severity, Template,
@@ -18,6 +20,7 @@ use crate::{
 pub enum TemplateError {
     MissingField(String),
     InvalidValue(String),
+    InvalidDSL(String),
     CantReadFile,
     InvalidYaml,
     Todo(String),
@@ -225,11 +228,26 @@ pub fn parse_matcher(
             if dsl_list.is_none() {
                 return Err(TemplateError::MissingField("dsl".into()));
             }
-            let mut dsl_strings: Vec<String> = dsl_list
-                .unwrap()
+            let dsl_list = dsl_list.unwrap();
+            let mut dsl_strings: Vec<CompiledExpression> = dsl_list
                 .iter()
-                .map(|item| item.as_str().unwrap().to_string())
+                .flat_map(|item| compile_expression(item.as_str().unwrap()))
                 .collect();
+            if dsl_strings.len() != dsl_list.len() {
+                let failed = dsl_list
+                    .iter()
+                    .filter_map(|item| {
+                        if compile_expression(item.as_str().unwrap()).is_err() {
+                            Some(TemplateError::InvalidDSL(
+                                item.as_str().unwrap().to_string(),
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .next();
+                return Err(failed.unwrap());
+            }
             dsls.append(&mut dsl_strings);
         }
         MatcherType::Regex(regexes) => {

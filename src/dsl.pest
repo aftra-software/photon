@@ -4,23 +4,24 @@ WHITESPACE = _{ " " | "\t" | "\n" }
 alpha = @{ (ALPHABETIC)+ }
 digit = @{ ("0" ~ "x" ~ ('0'..'9' | 'a'..'f' | 'A'..'F')+) | ('0'..'9')+ }
 
-ident = @{ ("_" | "." | alpha | digit)+ }
+ident = _{ ("_" | "." | alpha | digit)+ }
 
-predefined =  { "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
+predefined = _{ "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
 escape     = _{ "\\" ~ predefined }
-raw_string = _{ (!("\\" | "\"") ~ ANY)+ }
-string     =  { ("'" ~ (raw_string | escape)* ~ "'") | ("\"" ~ (raw_string | escape)* ~ "\"") }
+raw_string = _{ (!("\\" | "\"" | "'") ~ ANY)+ }
+string     =  { (raw_string | escape)* }
+_string    = _{ ("'" ~ string ~ "'") | ("\"" ~ string ~ "\"") }
 eoi        = _{ !ANY }
 
 init       = _{ SOI ~ primary ~ eoi }
 op         = _{ logicalop | comparator | modifier }
-value      = _{ prefix | digit | boolean | function | variable | string | list | clause }
-expr       = _{ value ~ (op ~ value)* }
+value      = _{ prefix | digit | boolean | function | variable | _string | list | clause }
+expr       = { value ~ (op ~ value)* }
 primary    = _{ ternary | expr }
 clause     =  { "(" ~ primary ~ ")" }
 list       =  { "(" ~ primary ~ ("," ~ primary)+ ~ ")" }
 boolean    =  { "true" | "false" }
-variable   =  { ident }
+variable   =  @{ ident }
 modifier   = _{ add | sub | mul | div | mod | exp | bitand | bitor | xor | shl | shr }
 comparator = _{ eq | gteq | gt | lteq | lt | neq | regexeq | regexneq | in }
 logicalop  = _{ or | and }

@@ -564,8 +564,10 @@ where
             Bytecode::Instr(OPCode::CallFunc) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    if !functions.contains_key(key) && CONFIG.get().unwrap().debug {
-                        println!("Variable not found: {:?}", key);
+                    if !functions.contains_key(key) {
+                        if CONFIG.get().unwrap().debug {
+                            println!("Function not found: {:?}", key);
+                        }
                         return Err(());
                     }
                     functions.get(key).unwrap()(&mut stack)?;
@@ -577,8 +579,10 @@ where
             Bytecode::Instr(OPCode::LoadVar) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    if !variables.contains_key(key) && CONFIG.get().unwrap().debug {
-                        println!("Variable not found: {:?}", key);
+                    if !variables.contains_key(key) {
+                        if CONFIG.get().unwrap().debug {
+                            println!("Variable not found: {:?}", key);
+                        }
                         return Err(());
                     }
                     stack.push(variables.get(key).unwrap().clone());

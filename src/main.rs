@@ -62,33 +62,34 @@ fn main() {
 
     let now = Instant::now();
 
-    // NEW:
-    let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
-    println!("AST output: {:?}", res);
+    if CONFIG.get().unwrap().debug {
+        let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
+        println!("AST output: {:?}", res);
 
-    if let Ok(ast) = res {
-        let bytecode = compile_bytecode(ast);
-        println!("Compiled expression: {:?}", bytecode);
-        println!(
-            "Took: {:.4} ms",
-            now.elapsed().as_nanos() as f64 / 1_000_000.0
-        );
-        if let Err(err) = fs::write("test.compiled", bytecode_to_binary(&bytecode)) {
-            println!("Error writing bytecode: {}", err);
+        if let Ok(ast) = res {
+            let bytecode = compile_bytecode(ast);
+            println!("Compiled expression: {:?}", bytecode);
+            println!(
+                "Took: {:.4} ms",
+                now.elapsed().as_nanos() as f64 / 1_000_000.0
+            );
+            if let Err(err) = fs::write("test.compiled", bytecode_to_binary(&bytecode)) {
+                println!("Error writing bytecode: {}", err);
+            }
+            let res = bytecode.execute(
+                HashMap::from([
+                    ("input".into(), Value::String("Hello".into())),
+                    ("test".into(), Value::Boolean(true)),
+                ]),
+                HashMap::from([("md5".into(), |stack: &mut DSLStack| {
+                    let inp = stack.pop_string()?;
+                    let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+                    stack.push(Value::String(hash));
+                    Ok(())
+                })]),
+            );
+            println!("Output from executed bytecode: {:?}", res);
         }
-        let res = bytecode.execute(
-            HashMap::from([
-                ("input".into(), Value::String("Hello".into())),
-                ("test".into(), Value::Boolean(true)),
-            ]),
-            HashMap::from([("md5".into(), |stack: &mut DSLStack| {
-                let inp = stack.pop_string()?;
-                let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-                stack.push(Value::String(hash));
-                Ok(())
-            })]),
-        );
-        println!("Output from executed bytecode: {:?}", res);
     }
 
     let mut templates = TemplateLoader::load_from_path(&args.templates);

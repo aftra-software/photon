@@ -5,7 +5,7 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value};
+use crate::{dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value}, CONFIG};
 
 #[derive(Parser)]
 #[grammar = "dsl.pest"]
@@ -16,10 +16,11 @@ pub fn compile_expression(data: &str) -> Result<CompiledExpression, ()> {
 }
 
 pub fn do_parsing(data: &str) -> Result<Expr, ()> {
-    println!("Parsing: '{data}'");
     let res = DSLParser::parse(Rule::init, data);
-    if let Err(err) = &res {
-        println!("parser error: {:?}", err);
+    if CONFIG.get().unwrap().debug { 
+        if let Err(err) = &res {
+            println!("parser error: {:?}", err);
+        }
     }
     let expr = parse_expr(res.map_err(|_| ())?);
     Ok(optimize_expr(expr))

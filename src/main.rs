@@ -62,6 +62,38 @@ fn main() {
 
     let now = Instant::now();
 
+    let mut functions: FxHashMap<String, Box<dyn Fn(&mut DSLStack) -> Result<(), ()>>> = FxHashMap::default();
+      
+    functions.insert("md5".into(), Box::new(|stack: &mut DSLStack| {
+        let inp = stack.pop_string()?;
+        let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+        stack.push(Value::String(hash));
+        Ok(())
+    }));
+    functions.insert("regex".into(), Box::new(|stack: &mut DSLStack| {
+        let inp = stack.pop_string()?;
+        let patt = stack.pop_string()?;
+        let reg = Regex::new(&patt).map_err(|_| ())?;
+        stack.push(Value::Boolean(reg.is_match(&inp)));
+        Ok(())
+    }));
+    functions.insert("contains".into(), Box::new(|stack: &mut DSLStack| {
+        let needle = stack.pop_string()?;
+        let haystack = stack.pop_string()?;
+        stack.push(Value::Boolean(haystack.contains(&needle)));
+        Ok(())
+    }));
+    functions.insert("tolower".into(), Box::new(|stack: &mut DSLStack| {
+        let inp = stack.pop_string()?;
+        stack.push(Value::String(inp.to_lowercase()));
+        Ok(())
+    }));
+    functions.insert("to_lower".into(), Box::new(|stack: &mut DSLStack| {
+        let inp = stack.pop_string()?;
+        stack.push(Value::String(inp.to_lowercase()));
+        Ok(())
+    }));
+
     if CONFIG.get().unwrap().debug {
         let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
         println!("AST output: {:?}", res);
@@ -82,12 +114,7 @@ fn main() {
                     ("input".into(), Value::String("Hello".into())),
                     ("test".into(), Value::Boolean(true)),
                 ]),
-                &FxHashMap::from_iter([("md5".into(), |stack: &mut DSLStack| {
-                    let inp = stack.pop_string()?;
-                    let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-                    stack.push(Value::String(hash));
-                    Ok(())
-                })]),
+                &functions,
             );
             println!("Output from executed bytecode: {:?}", res);
         }
@@ -104,7 +131,13 @@ fn main() {
 
     let template_len = templates.loaded_templates.len();
     for (i, template) in templates.loaded_templates.iter().enumerate() {
-        template.execute(base_url, &request_agent, &mut reqs, &mut templates.cache);
+        template.execute(
+            base_url,
+            &request_agent,
+            &functions,
+            &mut reqs,
+            &mut templates.cache,
+        );
         if args.stats && stopwatch.elapsed().as_secs_f32() > 20.0 {
             println!(
                 "RPS: {}, Template: {}/{}, Requests: {}",

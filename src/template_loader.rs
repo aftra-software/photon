@@ -6,7 +6,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
     cache::{Cache, CacheKey},
-    dsl::{compile_bytecode, Bytecode, CompiledExpression},
+    dsl::CompiledExpression,
     http::HttpReq,
     parser::compile_expression,
     template::{

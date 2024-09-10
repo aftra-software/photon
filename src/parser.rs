@@ -5,7 +5,10 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::{dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value}, CONFIG};
+use crate::{
+    dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value},
+    CONFIG,
+};
 
 #[derive(Parser)]
 #[grammar = "dsl.pest"]
@@ -17,7 +20,7 @@ pub fn compile_expression(data: &str) -> Result<CompiledExpression, ()> {
 
 pub fn do_parsing(data: &str) -> Result<Expr, ()> {
     let res = DSLParser::parse(Rule::init, data);
-    if CONFIG.get().unwrap().debug { 
+    if CONFIG.get().unwrap().debug {
         if let Err(err) = &res {
             println!("parser error: {:?}", err);
         }
@@ -75,11 +78,7 @@ fn my_unescape(s: &str) -> Result<String, ()> {
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
     match primary.as_rule() {
         Rule::clause => parse_expr(primary.into_inner()),
-        Rule::string => {
-            Expr::Constant(Value::String(
-                my_unescape(&primary.as_str()).unwrap(),
-            ))
-        },
+        Rule::string => Expr::Constant(Value::String(my_unescape(&primary.as_str()).unwrap())),
         Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
         Rule::variable => Expr::Variable(primary.as_str().to_string()),
         Rule::digit => {
@@ -111,7 +110,7 @@ fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
                 .into_inner()
                 .map(|pair| parse_primary(pair))
                 .collect();
-            
+
             Expr::Function(func.to_string(), args)
         }
         Rule::expr => parse_expr(primary.into_inner()),

@@ -1,7 +1,7 @@
 use core::panic;
 
-use rustc_hash::FxHashMap;
 use regex::Regex;
+use rustc_hash::FxHashMap;
 
 use crate::CONFIG;
 

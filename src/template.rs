@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::{
     cache::Cache,
     dsl::{CompiledExpression, DSLStack, Value},
@@ -7,7 +5,7 @@ use crate::{
 };
 use md5::{Digest, Md5};
 use regex::{Regex, RegexSet};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use ureq::Agent;
 
 #[derive(Debug, Clone, Copy)]
@@ -87,8 +85,8 @@ pub struct HttpRequest {
 }
 
 #[derive(Debug)]
-struct Context {
-    variables: FxHashMap<String, Value>
+pub struct Context {
+    pub variables: FxHashMap<String, Value>,
 }
 
 #[derive(Debug)]
@@ -118,7 +116,15 @@ impl Severity {
 }
 
 impl Matcher {
-    pub fn matches(&self, data: &HttpResponse, context: &Context) -> bool {
+    pub fn matches<F>(
+        &self,
+        data: &HttpResponse,
+        functions: &FxHashMap<String, F>,
+        context: &Context,
+    ) -> bool
+    where
+        F: Fn(&mut DSLStack) -> Result<(), ()>,
+    {
         if let MatcherType::Status(_) = self.r#type {
             return self.matches_status(data.status_code);
         }
@@ -152,21 +158,25 @@ impl Matcher {
         };
         match &self.r#type {
             MatcherType::DSL(dsls) => {
-                for expr in dsls {
-                    let res = expr.execute(&context.variables, &FxHashMap::from_iter([("md5".into(), |stack: &mut DSLStack| {
-                        let inp = stack.pop_string()?;
-                        let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-                        stack.push(Value::String(hash));
-                        Ok(())
-                    })]));
-                    if let Ok(ret) = res {
-                        if let Value::Boolean(true) = ret {
-                            return true;
-                        }
-                    }
+                if self.condition == Condition::OR {
+                    dsls.iter().any(|expr| {
+                        let res = expr.execute(
+                            &context.variables,
+                            &functions,
+                        );
+                        res.is_ok() && (res.unwrap() == Value::Boolean(true))
+                    })
+                } else {
+                    dsls.iter().all(|expr| {
+                        let res = expr.execute(
+                            &context.variables,
+                            &functions,
+                        );
+                        res.is_ok() && (res.unwrap() == Value::Boolean(true))
+                    })
                 }
-                false
-            },
+            }
+            // TODO: Make sure Condition is taken into consideration
             MatcherType::Regex(regexes) => match regexes {
                 RegexType::PatternList(patterns) => {
                     patterns.iter().all(|pattern| pattern.is_match(&data))
@@ -192,28 +202,55 @@ impl Matcher {
 }
 
 impl HttpRequest {
-    pub fn execute(
+    pub fn execute<F>(
         &self,
         base_url: &str,
         agent: &Agent,
+        functions: &FxHashMap<String, F>,
         req_counter: &mut u32,
         cache: &mut Cache,
-    ) -> Vec<MatchResult> {
+    ) -> Vec<MatchResult>
+    where
+        F: Fn(&mut DSLStack) -> Result<(), ()>,
+    {
         // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
         let mut matches = Vec::new();
         let mut ctx = Context {
-            variables: FxHashMap::default()
+            variables: FxHashMap::default(),
         };
 
         for (idx, req) in self.path.iter().enumerate() {
             let maybe_resp = req.do_request(base_url, agent, req_counter, cache);
             if let Some(resp) = maybe_resp {
-                ctx.variables.insert(format!("body_{}", idx+1), Value::String(resp.body.clone()));
-                ctx.variables.insert("body".to_string(), Value::String(resp.body.clone()));
-                ctx.variables.insert("status_code".to_string(), Value::Int(resp.status_code as i64));
+                ctx.variables.insert(
+                    format!("body_{}", idx + 1),
+                    Value::String(resp.body.clone()),
+                );
+                ctx.variables
+                    .insert("body".to_string(), Value::String(resp.body.clone()));
+                ctx.variables.insert(
+                    format!("status_code_{}", idx + 1),
+                    Value::Int(resp.status_code as i64),
+                );
+                ctx.variables.insert(
+                    "status_code".to_string(),
+                    Value::Int(resp.status_code as i64),
+                );
+                ctx.variables.insert(
+                    "header".to_string(),
+                    Value::String(
+                        resp.headers
+                            .iter()
+                            .fold(String::with_capacity(512), |acc, hed| {
+                                acc + &format!("{}: {}", hed.0, hed.1) + "\n"
+                            })
+                            .trim()
+                            .to_string(),
+                    ),
+                );
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
-                    if matcher.negative ^ matcher.matches(&resp, &ctx) {
+                    if matcher.negative ^ matcher.matches(&resp, functions, &ctx) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
                             internal: matcher.internal,
@@ -245,15 +282,24 @@ impl HttpRequest {
 }
 
 impl Template {
-    pub fn execute(&self, base_url: &str, agent: &Agent, req_counter: &mut u32, cache: &mut Cache) {
+    pub fn execute<F>(
+        &self,
+        base_url: &str,
+        agent: &Agent,
+        functions: &FxHashMap<String, F>,
+        req_counter: &mut u32,
+        cache: &mut Cache,
+    ) where
+        F: Fn(&mut DSLStack) -> Result<(), ()>,
+    {
         for http in self.http.iter() {
-            let match_results = http.execute(base_url, agent, req_counter, cache);
+            let match_results = http.execute(base_url, agent, functions, req_counter, cache);
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever
                 // missing-header:content-security-policy
                 // And want to display the different cases that were matched
-                let mut unique_names = HashSet::new();
+                let mut unique_names = FxHashSet::default();
                 for matched in match_results.iter() {
                     if !matched.internal {
                         unique_names.insert(matched.name.clone());

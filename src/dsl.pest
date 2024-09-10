@@ -4,7 +4,7 @@ WHITESPACE = _{ " " | "\t" | "\n" }
 alpha = @{ (ALPHABETIC)+ }
 digit = @{ ("0" ~ "x" ~ ('0'..'9' | 'a'..'f' | 'A'..'F')+) | ('0'..'9')+ }
 
-ident = _{ ("_" | "." | alpha | digit)+ }
+ident = @{ ("_" | "." | alpha) ~ ("_" | "." | alpha | digit)* }
 
 predefined = _{ "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
 escape     = _{ "\\" ~ predefined }
@@ -16,7 +16,7 @@ eoi        = _{ !ANY }
 init       = _{ SOI ~ primary ~ eoi }
 op         = _{ logicalop | comparator | modifier }
 value      = _{ prefix | digit | boolean | function | variable | _string | list | clause }
-expr       = { value ~ (op ~ value)* }
+expr       =  { value ~ (op ~ value)* }
 primary    = _{ ternary | expr }
 clause     =  { "(" ~ primary ~ ")" }
 list       =  { "(" ~ primary ~ ("," ~ primary)+ ~ ")" }

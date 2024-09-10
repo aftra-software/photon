@@ -160,18 +160,12 @@ impl Matcher {
             MatcherType::DSL(dsls) => {
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr.execute(
-                            &context.variables,
-                            &functions,
-                        );
+                        let res = expr.execute(&context.variables, &functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr.execute(
-                            &context.variables,
-                            &functions,
-                        );
+                        let res = expr.execute(&context.variables, &functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }

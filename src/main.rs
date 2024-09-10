@@ -62,37 +62,53 @@ fn main() {
 
     let now = Instant::now();
 
-    let mut functions: FxHashMap<String, Box<dyn Fn(&mut DSLStack) -> Result<(), ()>>> = FxHashMap::default();
-      
-    functions.insert("md5".into(), Box::new(|stack: &mut DSLStack| {
-        let inp = stack.pop_string()?;
-        let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-        stack.push(Value::String(hash));
-        Ok(())
-    }));
-    functions.insert("regex".into(), Box::new(|stack: &mut DSLStack| {
-        let inp = stack.pop_string()?;
-        let patt = stack.pop_string()?;
-        let reg = Regex::new(&patt).map_err(|_| ())?;
-        stack.push(Value::Boolean(reg.is_match(&inp)));
-        Ok(())
-    }));
-    functions.insert("contains".into(), Box::new(|stack: &mut DSLStack| {
-        let needle = stack.pop_string()?;
-        let haystack = stack.pop_string()?;
-        stack.push(Value::Boolean(haystack.contains(&needle)));
-        Ok(())
-    }));
-    functions.insert("tolower".into(), Box::new(|stack: &mut DSLStack| {
-        let inp = stack.pop_string()?;
-        stack.push(Value::String(inp.to_lowercase()));
-        Ok(())
-    }));
-    functions.insert("to_lower".into(), Box::new(|stack: &mut DSLStack| {
-        let inp = stack.pop_string()?;
-        stack.push(Value::String(inp.to_lowercase()));
-        Ok(())
-    }));
+    let mut functions: FxHashMap<String, Box<dyn Fn(&mut DSLStack) -> Result<(), ()>>> =
+        FxHashMap::default();
+
+    functions.insert(
+        "md5".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let inp = stack.pop_string()?;
+            let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+            stack.push(Value::String(hash));
+            Ok(())
+        }),
+    );
+    functions.insert(
+        "regex".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let inp = stack.pop_string()?;
+            let patt = stack.pop_string()?;
+            let reg = Regex::new(&patt).map_err(|_| ())?;
+            stack.push(Value::Boolean(reg.is_match(&inp)));
+            Ok(())
+        }),
+    );
+    functions.insert(
+        "contains".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let needle = stack.pop_string()?;
+            let haystack = stack.pop_string()?;
+            stack.push(Value::Boolean(haystack.contains(&needle)));
+            Ok(())
+        }),
+    );
+    functions.insert(
+        "tolower".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let inp = stack.pop_string()?;
+            stack.push(Value::String(inp.to_lowercase()));
+            Ok(())
+        }),
+    );
+    functions.insert(
+        "to_lower".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let inp = stack.pop_string()?;
+            stack.push(Value::String(inp.to_lowercase()));
+            Ok(())
+        }),
+    );
 
     if CONFIG.get().unwrap().debug {
         let res = do_parsing(&fs::read_to_string(&args.test).unwrap());

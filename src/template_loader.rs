@@ -267,7 +267,7 @@ pub fn parse_matcher(
             if patterns.iter().any(|item| item.is_err()) {
                 let err = patterns.iter().find(|item| item.is_err()).cloned().unwrap();
                 return Err(TemplateError::InvalidValue(format!(
-                    "Could not parse regex, parse output: {}",
+                    "Could not parse regex, parse output:\n{}",
                     err.unwrap_err()
                 )));
             }
@@ -337,11 +337,19 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
         .collect();
 
     if matchers_parsed.iter().any(|item| item.is_err()) {
-        return Err(matchers_parsed
-            .into_iter()
-            .find(|item| item.is_err())
-            .unwrap()
-            .unwrap_err());
+        if matchers_condition == Condition::AND {
+            return Err(matchers_parsed
+                .into_iter()
+                .find(|item| item.is_err())
+                .unwrap()
+                .unwrap_err());
+        } else if CONFIG.get().unwrap().debug {
+            println!("matcher failed, but was optional:");
+            matchers_parsed
+            .iter()
+            .filter(|item| item.is_err())
+            .for_each(|failed| println!("{:?}", failed));
+        }
     }
 
     let matchers = matchers_parsed.into_iter().flatten().flatten().collect();

@@ -1,9 +1,9 @@
 mod cache;
 mod dsl;
 mod http;
+mod parser;
 mod template;
 mod template_loader;
-mod parser;
 
 use std::{
     collections::HashMap,
@@ -79,8 +79,8 @@ fn main() {
         let res = bytecode.execute(
             HashMap::from([
                 ("input".into(), Value::String("Hello".into())),
-                ("test".into(), Value::Boolean(true))
-                ]),
+                ("test".into(), Value::Boolean(true)),
+            ]),
             HashMap::from([("md5".into(), |stack: &mut DSLStack| {
                 let inp = stack.pop_string()?;
                 let hash = base16ct::lower::encode_string(&Md5::digest(inp));
@@ -90,7 +90,7 @@ fn main() {
         );
         println!("Output from executed bytecode: {:?}", res);
     }
-    
+
     let mut templates = TemplateLoader::load_from_path(&args.templates);
 
     let base_url = &args.url;

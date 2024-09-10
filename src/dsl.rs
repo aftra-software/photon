@@ -10,7 +10,7 @@ pub enum OPCode {
     LoadConstStr = 2,
     LoadConstShort = 3, // 16 bit
     LoadConstInt = 4,   // 64 bit
-    LoadConstBoolTrue = 5, 
+    LoadConstBoolTrue = 5,
     LoadConstBoolFalse = 6,
     CallFunc = 7,
 
@@ -282,18 +282,22 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             middle.push(Bytecode::Value(Value::Short(right.len() as i16)));
 
             ops.push(Bytecode::Value(Value::Short(middle.len() as i16))); // + 3 to adjust for Jump out of middle
-            
+
             ops.append(&mut middle);
             ops.append(&mut right);
 
             CompiledExpression(ops)
         }
-        Expr::Constant(Value::Boolean(val)) => CompiledExpression(vec![Bytecode::Instr(if val { OPCode::LoadConstBoolTrue } else { OPCode::LoadConstBoolFalse})]),
+        Expr::Constant(Value::Boolean(val)) => CompiledExpression(vec![Bytecode::Instr(if val {
+            OPCode::LoadConstBoolTrue
+        } else {
+            OPCode::LoadConstBoolFalse
+        })]),
         Expr::Constant(value) => {
             let op = match value {
                 Value::String(_) => OPCode::LoadConstStr,
                 Value::Int(_) => OPCode::LoadConstInt,
-                _ => unreachable!("not possible")
+                _ => unreachable!("not possible"),
             };
             CompiledExpression(vec![Bytecode::Instr(op), Bytecode::Value(value)])
         }
@@ -381,7 +385,7 @@ impl DSLStack {
             other => {
                 println!("Attempted to pop an int but got {:?}", other);
                 Err(())
-            },
+            }
         }
     }
 
@@ -391,7 +395,7 @@ impl DSLStack {
             other => {
                 println!("Attempted to pop a short but got {:?}", other);
                 Err(())
-            },
+            }
         }
     }
 
@@ -401,7 +405,7 @@ impl DSLStack {
             other => {
                 println!("Attempted to pop a bool but got {:?}", other);
                 Err(())
-            },
+            }
         }
     }
 
@@ -411,7 +415,7 @@ impl DSLStack {
             other => {
                 println!("Attempted to pop a string but got {:?}", other);
                 Err(())
-            },
+            }
         }
     }
 }

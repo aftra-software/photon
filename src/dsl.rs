@@ -1,7 +1,9 @@
 use core::panic;
-use std::collections::HashMap;
 
+use rustc_hash::FxHashMap;
 use regex::Regex;
+
+use crate::CONFIG;
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -547,8 +549,8 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
 
 fn execute_bytecode<F>(
     compiled: &CompiledExpression,
-    variables: HashMap<String, Value>,
-    functions: HashMap<String, F>,
+    variables: &FxHashMap<String, Value>,
+    functions: &FxHashMap<String, F>,
 ) -> Result<Value, ()>
 where
     F: Fn(&mut DSLStack) -> Result<(), ()>,
@@ -562,7 +564,7 @@ where
             Bytecode::Instr(OPCode::CallFunc) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    if !functions.contains_key(key) {
+                    if !functions.contains_key(key) && CONFIG.get().unwrap().debug {
                         println!("Variable not found: {:?}", key);
                         return Err(());
                     }
@@ -575,7 +577,7 @@ where
             Bytecode::Instr(OPCode::LoadVar) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    if !variables.contains_key(key) {
+                    if !variables.contains_key(key) && CONFIG.get().unwrap().debug {
                         println!("Variable not found: {:?}", key);
                         return Err(());
                     }
@@ -656,8 +658,8 @@ where
 impl CompiledExpression {
     pub fn execute<F>(
         &self,
-        variables: HashMap<String, Value>,
-        functions: HashMap<String, F>,
+        variables: &FxHashMap<String, Value>,
+        functions: &FxHashMap<String, F>,
     ) -> Result<Value, ()>
     where
         F: Fn(&mut DSLStack) -> Result<(), ()>,

@@ -6,7 +6,6 @@ mod template;
 mod template_loader;
 
 use std::{
-    collections::HashMap,
     fs,
     sync::{Mutex, OnceLock},
     time::Instant,
@@ -18,6 +17,7 @@ use http::IGNORE_PATTERN;
 use md5::{Digest, Md5};
 use parser::do_parsing;
 use regex::Regex;
+use rustc_hash::FxHashMap;
 use template_loader::TemplateLoader;
 use ureq::Agent;
 
@@ -76,12 +76,13 @@ fn main() {
             if let Err(err) = fs::write("test.compiled", bytecode_to_binary(&bytecode)) {
                 println!("Error writing bytecode: {}", err);
             }
+
             let res = bytecode.execute(
-                HashMap::from([
+                &FxHashMap::from_iter([
                     ("input".into(), Value::String("Hello".into())),
                     ("test".into(), Value::Boolean(true)),
                 ]),
-                HashMap::from([("md5".into(), |stack: &mut DSLStack| {
+                &FxHashMap::from_iter([("md5".into(), |stack: &mut DSLStack| {
                     let inp = stack.pop_string()?;
                     let hash = base16ct::lower::encode_string(&Md5::digest(inp));
                     stack.push(Value::String(hash));

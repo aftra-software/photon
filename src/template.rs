@@ -1,11 +1,13 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     cache::Cache,
-    dsl::CompiledExpression,
+    dsl::{CompiledExpression, DSLStack, Value},
     http::{HttpReq, HttpResponse},
 };
+use md5::{Digest, Md5};
 use regex::{Regex, RegexSet};
+use rustc_hash::FxHashMap;
 use ureq::Agent;
 
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +87,11 @@ pub struct HttpRequest {
 }
 
 #[derive(Debug)]
+struct Context {
+    variables: FxHashMap<String, Value>
+}
+
+#[derive(Debug)]
 pub struct Template {
     pub id: String,
     pub info: Info,
@@ -98,17 +105,6 @@ pub struct MatchResult {
 }
 
 impl Severity {
-    pub fn to_string(&self) -> String {
-        match self {
-            Self::Critical => "critical".to_string(),
-            Self::High => "high".to_string(),
-            Self::Medium => "medium".to_string(),
-            Self::Low => "low".to_string(),
-            Self::Info => "info".to_string(),
-            Self::Unknown => "unknown".to_string(),
-        }
-    }
-
     pub fn colored_string(&self) -> String {
         match self {
             Self::Critical => "\x1b[0;35mcritical\x1b[0m".to_string(),
@@ -122,7 +118,7 @@ impl Severity {
 }
 
 impl Matcher {
-    pub fn matches(&self, data: &HttpResponse) -> bool {
+    pub fn matches(&self, data: &HttpResponse, context: &Context) -> bool {
         if let MatcherType::Status(_) = self.r#type {
             return self.matches_status(data.status_code);
         }
@@ -155,7 +151,22 @@ impl Matcher {
             }
         };
         match &self.r#type {
-            MatcherType::DSL(_) => false,
+            MatcherType::DSL(dsls) => {
+                for expr in dsls {
+                    let res = expr.execute(&context.variables, &FxHashMap::from_iter([("md5".into(), |stack: &mut DSLStack| {
+                        let inp = stack.pop_string()?;
+                        let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+                        stack.push(Value::String(hash));
+                        Ok(())
+                    })]));
+                    if let Ok(ret) = res {
+                        if let Value::Boolean(true) = ret {
+                            return true;
+                        }
+                    }
+                }
+                false
+            },
             MatcherType::Regex(regexes) => match regexes {
                 RegexType::PatternList(patterns) => {
                     patterns.iter().all(|pattern| pattern.is_match(&data))
@@ -190,13 +201,18 @@ impl HttpRequest {
     ) -> Vec<MatchResult> {
         // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
         let mut matches = Vec::new();
+        let mut ctx = Context {
+            variables: FxHashMap::default()
+        };
 
-        for req in self.path.iter() {
+        for (idx, req) in self.path.iter().enumerate() {
             let maybe_resp = req.do_request(base_url, agent, req_counter, cache);
             if let Some(resp) = maybe_resp {
+                ctx.variables.insert(format!("body_{}", idx+1), Value::String(resp.body.clone()));
+                ctx.variables.insert("body".to_string(), Value::String(resp.body.clone()));
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
-                    if matcher.negative ^ matcher.matches(&resp) {
+                    if matcher.negative ^ matcher.matches(&resp, &ctx) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
                             internal: matcher.internal,

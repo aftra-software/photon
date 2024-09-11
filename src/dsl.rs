@@ -224,7 +224,7 @@ fn map_op(op: Operator) -> OPCode {
         Operator::GtEq => OPCode::CmpGtEq,
         Operator::Lt => OPCode::CmpLt,
         Operator::LtEq => OPCode::CmpLtEq,
-        Operator::In => OPCode::In, // TODO: Handle differently
+        Operator::In => OPCode::In,
         Operator::BitAnd => OPCode::BinAnd,
         Operator::BitOr => OPCode::BinOr,
         Operator::Div => OPCode::Div,
@@ -243,8 +243,6 @@ fn map_op(op: Operator) -> OPCode {
 }
 
 pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
-    // For now we give everything left-presidence
-
     match expr {
         Expr::Operator(left, op, right) => {
             let mut ops = Vec::new();

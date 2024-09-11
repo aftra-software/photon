@@ -186,7 +186,6 @@ impl Matcher {
                     })
                 }
             }
-            // TODO: Make sure Condition is taken into consideration
             MatcherType::Regex(regexes) => {
                 if self.condition == Condition::OR {
                     regexes.iter().any(|pattern| pattern.is_match(&data))

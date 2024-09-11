@@ -451,6 +451,13 @@ pub fn load_template(file: &str) -> Result<Template, TemplateError> {
 
     let info = parse_info(&template_yaml["info"])?;
 
+    // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean 
+    // for if that http request (defined right below) matched
+
+    if !template_yaml["flow"].is_badvalue() {
+        return Err(TemplateError::InvalidYaml);
+    }
+
     let http_parsed = if template_yaml["http"].is_badvalue() {
         vec![]
     } else {

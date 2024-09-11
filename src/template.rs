@@ -1,7 +1,7 @@
 use std::{rc::Rc, sync::Mutex};
 
 use crate::{
-    cache::Cache,
+    cache::{Cache, RegexCache},
     dsl::{CompiledExpression, DSLStack, Value},
     http::{HttpReq, HttpResponse},
 };
@@ -33,7 +33,7 @@ pub enum Method {
 pub enum MatcherType {
     Word(Vec<String>),
     DSL(Vec<CompiledExpression>),
-    Regex(Vec<Regex>),
+    Regex(Vec<u32>), // indicies into RegexCache
     Status(Vec<u8>),
 }
 
@@ -139,6 +139,7 @@ impl Matcher {
     pub fn matches<F>(
         &self,
         data: &HttpResponse,
+        regex_cache: &RegexCache,
         functions: &FxHashMap<String, F>,
         context: &Context,
     ) -> bool
@@ -193,9 +194,9 @@ impl Matcher {
             }
             MatcherType::Regex(regexes) => {
                 if self.condition == Condition::OR {
-                    regexes.iter().any(|pattern| pattern.is_match(&data))
+                    regexes.iter().any(|pattern| regex_cache.matches(*pattern, &data))
                 } else {
-                    regexes.iter().all(|pattern| pattern.is_match(&data))
+                    regexes.iter().all(|pattern| regex_cache.matches(*pattern, &data))
                 }
             }
             MatcherType::Word(words) => {
@@ -222,6 +223,7 @@ impl HttpRequest {
         base_url: &str,
         agent: &Agent,
         functions: &FxHashMap<String, F>,
+        regex_cache: &RegexCache,
         parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
         cache: &mut Cache,
@@ -267,7 +269,7 @@ impl HttpRequest {
                 );
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
-                    if matcher.negative ^ matcher.matches(&resp, functions, &ctx) {
+                    if matcher.negative ^ matcher.matches(&resp, regex_cache, functions, &ctx) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
                             internal: matcher.internal,
@@ -307,6 +309,7 @@ impl Template {
         functions: &FxHashMap<String, F>,
         req_counter: &mut u32,
         cache: &mut Cache,
+        regex_cache: &RegexCache
     ) where
         F: Fn(&mut DSLStack) -> Result<(), ()>,
     {
@@ -316,7 +319,7 @@ impl Template {
         }));
         for http in self.http.iter() {
             let match_results =
-                http.execute(base_url, agent, functions, ctx.clone(), req_counter, cache);
+                http.execute(base_url, agent, functions, regex_cache, ctx.clone(), req_counter, cache);
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever

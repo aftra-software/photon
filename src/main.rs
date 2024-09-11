@@ -177,6 +177,7 @@ fn main() {
             &functions,
             &mut reqs,
             &mut templates.cache,
+            &templates.regex_cache
         );
         if args.stats && stopwatch.elapsed().as_secs_f32() > 20.0 {
             println!(

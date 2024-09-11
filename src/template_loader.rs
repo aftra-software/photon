@@ -1,11 +1,12 @@
 use std::{collections::HashMap, fmt::Debug, fs};
 
 use regex::Regex;
+use rustc_hash::FxHashMap;
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
-    cache::{Cache, CacheKey},
+    cache::{Cache, CacheKey, RegexCache},
     dsl::CompiledExpression,
     http::HttpReq,
     parser::compile_expression,
@@ -170,6 +171,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
 pub fn parse_matcher(
     yaml: &Yaml,
     matchers_condition: Condition,
+    regex_cache: &mut RegexCache
 ) -> Result<Option<Matcher>, TemplateError> {
     let matcher_part = yaml["part"].as_str();
     let matcher_type = yaml["type"].as_str();
@@ -261,8 +263,8 @@ pub fn parse_matcher(
                 .map(|item| item.as_str().unwrap().to_string())
                 .collect();
 
-            let patterns: Vec<Result<Regex, _>> =
-                regex_strings.iter().map(|patt| Regex::new(patt)).collect();
+            let patterns: Vec<Result<u32, _>> =
+                regex_strings.iter().map(|patt| regex_cache.insert(patt)).collect();
 
             if patterns.iter().any(|item| item.is_err()) {
                 let err = patterns.iter().find(|item| item.is_err()).cloned().unwrap();
@@ -299,7 +301,7 @@ pub fn parse_matcher(
     }))
 }
 
-pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
+pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpRequest, TemplateError> {
     let http_method = yaml["method"].as_str();
     let http_matchers = yaml["matchers"].as_vec();
 
@@ -329,7 +331,7 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
     let matchers_parsed: Vec<_> = http_matchers
         .unwrap()
         .iter()
-        .map(|item| parse_matcher(item, matchers_condition))
+        .map(|item| parse_matcher(item, matchers_condition, regex_cache))
         .collect();
 
     if matchers_parsed.iter().any(|item| item.is_err()) {
@@ -434,7 +436,7 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
     })
 }
 
-pub fn load_template(file: &str) -> Result<Template, TemplateError> {
+pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Template, TemplateError> {
     let template_yaml = &load_yaml_from_file(file)?[0];
 
     if template_yaml["info"].is_badvalue() {
@@ -466,7 +468,7 @@ pub fn load_template(file: &str) -> Result<Template, TemplateError> {
             .as_vec()
             .unwrap()
             .iter()
-            .map(parse_http)
+            .map(|yaml| parse_http(yaml, regex_cache))
             .collect()
     };
 
@@ -490,6 +492,7 @@ pub fn load_template(file: &str) -> Result<Template, TemplateError> {
 pub struct TemplateLoader {
     pub loaded_templates: Vec<Template>,
     pub cache: Cache,
+    pub regex_cache: RegexCache
 }
 
 impl TemplateLoader {
@@ -498,6 +501,7 @@ impl TemplateLoader {
         let mut success = 0;
 
         let mut loaded_templates = Vec::new();
+        let mut regex_cache = RegexCache::new();
 
         for entry_res in WalkDir::new(path) {
             if let Ok(entry) = entry_res {
@@ -506,7 +510,7 @@ impl TemplateLoader {
                     && (entry.path().extension().unwrap() == "yml"
                         || entry.path().extension().unwrap() == "yaml")
                 {
-                    let template = load_template(entry.path().to_str().unwrap());
+                    let template = load_template(entry.path().to_str().unwrap(), &mut regex_cache);
                     if template.is_ok() {
                         success += 1;
                         loaded_templates.push(template.unwrap());
@@ -544,8 +548,10 @@ impl TemplateLoader {
             }
         }
         let cache = Cache::new(tokens);
+        regex_cache.finalize();
         Self {
             cache,
+            regex_cache,
             loaded_templates,
         }
     }

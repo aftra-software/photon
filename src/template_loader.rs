@@ -10,8 +10,8 @@ use crate::{
     http::HttpReq,
     parser::compile_expression,
     template::{
-        Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart,
-        Severity, Template,
+        Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
+        Template,
     },
     CONFIG,
 };
@@ -342,9 +342,9 @@ pub fn parse_http(yaml: &Yaml) -> Result<HttpRequest, TemplateError> {
         } else if CONFIG.get().unwrap().debug {
             println!("matcher failed, but was optional:");
             matchers_parsed
-            .iter()
-            .filter(|item| item.is_err())
-            .for_each(|failed| println!("{:?}", failed));
+                .iter()
+                .filter(|item| item.is_err())
+                .for_each(|failed| println!("{:?}", failed));
         }
     }
 
@@ -447,14 +447,14 @@ pub fn load_template(file: &str) -> Result<Template, TemplateError> {
 
     let info = parse_info(&template_yaml["info"])?;
 
-    // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean 
+    // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean
     // for if that http request (defined right below) matched
     if !template_yaml["flow"].is_badvalue() {
         if template_yaml["flow"].as_str().is_some() {
             let dsl = compile_expression(template_yaml["flow"].as_str().unwrap());
             //println!("{:?} - {}", dsl, template_yaml["flow"].as_str().unwrap());
         } else {
-            return Err(TemplateError::InvalidValue("flow".into()))
+            return Err(TemplateError::InvalidValue("flow".into()));
         }
         return Err(TemplateError::InvalidYaml);
     }

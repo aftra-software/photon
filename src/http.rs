@@ -47,7 +47,7 @@ impl HttpReq {
     pub fn bake(&self, base_url: &str) -> String {
         self.path.replace("{{BaseURL}}", base_url)
     }
-    
+
     pub fn bake_raw(&self, base_url: &str) -> String {
         self.raw
             .replace("{{BaseURL}}", base_url)

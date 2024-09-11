@@ -29,7 +29,6 @@ pub enum Method {
     OPTIONS,
 }
 
-
 #[derive(Debug)]
 pub enum MatcherType {
     Word(Vec<String>),
@@ -84,7 +83,7 @@ pub struct HttpRequest {
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
-    pub parent: Option<Rc<Mutex<Context>>>
+    pub parent: Option<Rc<Mutex<Context>>>,
 }
 
 impl Context {
@@ -93,7 +92,13 @@ impl Context {
     // TODO: Probably incredibly slow
     pub fn flatten_variables(&self) -> FxHashMap<String, Value> {
         if self.parent.is_some() {
-            let mut variables = self.parent.as_ref().unwrap().lock().unwrap().flatten_variables();
+            let mut variables = self
+                .parent
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .flatten_variables();
             for (k, v) in self.variables.iter() {
                 variables.insert(k.clone(), v.clone());
             }
@@ -192,7 +197,7 @@ impl Matcher {
                 } else {
                     regexes.iter().all(|pattern| pattern.is_match(&data))
                 }
-            },
+            }
             MatcherType::Word(words) => {
                 if self.condition == Condition::OR {
                     words.iter().any(|needle| data.contains(needle))
@@ -228,7 +233,7 @@ impl HttpRequest {
         let mut matches = Vec::new();
         let mut ctx = Context {
             variables: FxHashMap::default(),
-            parent: Some(parent_ctx)
+            parent: Some(parent_ctx),
         };
 
         for (idx, req) in self.path.iter().enumerate() {
@@ -307,10 +312,11 @@ impl Template {
     {
         let ctx = Rc::from(Mutex::from(Context {
             variables: FxHashMap::default(),
-            parent: Some(parent_ctx)
+            parent: Some(parent_ctx),
         }));
         for http in self.http.iter() {
-            let match_results = http.execute(base_url, agent, functions, ctx.clone(), req_counter, cache);
+            let match_results =
+                http.execute(base_url, agent, functions, ctx.clone(), req_counter, cache);
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever

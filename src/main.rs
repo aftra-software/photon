@@ -6,7 +6,10 @@ mod template;
 mod template_loader;
 
 use std::{
-    fs, rc::Rc, sync::{Mutex, OnceLock}, time::Instant
+    fs,
+    rc::Rc,
+    sync::{Mutex, OnceLock},
+    time::Instant,
 };
 
 use clap::Parser;
@@ -147,16 +150,22 @@ fn main() {
 
     let ctx = Rc::from(Mutex::from(Context {
         variables: FxHashMap::default(),
-        parent: None
+        parent: None,
     }));
     {
         let parsed: Result<Url, _> = base_url.parse();
         if let Ok(url) = parsed {
             if let Some(hostname) = url.host_str() {
-                ctx.lock().unwrap().variables.insert("hostname".to_string(), Value::String(hostname.to_string()));
+                ctx.lock()
+                    .unwrap()
+                    .variables
+                    .insert("hostname".to_string(), Value::String(hostname.to_string()));
             }
         }
-        ctx.lock().unwrap().variables.insert("BaseURL".to_string(), Value::String(base_url.to_string()));
+        ctx.lock()
+            .unwrap()
+            .variables
+            .insert("BaseURL".to_string(), Value::String(base_url.to_string()));
     }
 
     let template_len = templates.loaded_templates.len();

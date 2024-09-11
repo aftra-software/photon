@@ -13,7 +13,7 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value};
+use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value, GLOBAL_FUNCTIONS};
 use http::IGNORE_PATTERN;
 use md5::{Digest, Md5};
 use parser::do_parsing;
@@ -54,7 +54,7 @@ struct Config {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn main() {
-    let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{.*}}").unwrap()));
+    let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^}]*}}").unwrap()));
 
     let args = Args::parse();
 
@@ -65,8 +65,10 @@ fn main() {
 
     let now = Instant::now();
 
-    let mut functions: FxHashMap<String, Box<dyn Fn(&mut DSLStack) -> Result<(), ()>>> =
-        FxHashMap::default();
+    let mut functions: FxHashMap<
+        String,
+        Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>,
+    > = FxHashMap::default();
 
     functions.insert(
         "md5".into(),
@@ -113,6 +115,8 @@ fn main() {
         }),
     );
 
+    GLOBAL_FUNCTIONS.set(functions);
+
     if CONFIG.get().unwrap().debug {
         let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
         println!("AST output: {:?}", res);
@@ -133,7 +137,7 @@ fn main() {
                     ("input".into(), Value::String("Hello".into())),
                     ("test".into(), Value::Boolean(true)),
                 ]),
-                &functions,
+                &GLOBAL_FUNCTIONS.get().unwrap(),
             );
             println!("Output from executed bytecode: {:?}", res);
         }
@@ -174,10 +178,9 @@ fn main() {
             base_url,
             &request_agent,
             ctx.clone(), // Cheap reference clone
-            &functions,
             &mut reqs,
             &mut templates.cache,
-            &templates.regex_cache
+            &templates.regex_cache,
         );
         if args.stats && stopwatch.elapsed().as_secs_f32() > 20.0 {
             println!(

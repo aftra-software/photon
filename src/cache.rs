@@ -19,7 +19,7 @@ impl Cache {
         let mut new = Self {
             inner: HashMap::new(),
             current_tokens: HashMap::new(),
-            tokens
+            tokens,
         };
         new.reset();
 
@@ -74,7 +74,7 @@ impl RegexCache {
     pub fn new() -> Self {
         Self {
             patterns: vec![],
-            known: FxHashMap::default()
+            known: FxHashMap::default(),
         }
     }
 

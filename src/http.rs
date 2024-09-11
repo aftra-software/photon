@@ -4,11 +4,14 @@ use std::{
 };
 
 use regex::Regex;
+use rustc_hash::FxHashMap;
 use ureq::{Agent, Response};
 
 use crate::{
     cache::{Cache, CacheKey},
-    template::Method,
+    dsl::{Value, GLOBAL_FUNCTIONS},
+    parser::compile_expression,
+    template::{Context, Method},
     CONFIG,
 };
 
@@ -44,8 +47,25 @@ fn parse_response(inp: Response, duration: f32) -> HttpResponse {
 }
 
 impl HttpReq {
-    pub fn bake(&self, base_url: &str) -> String {
-        self.path.replace("{{BaseURL}}", base_url)
+    pub fn bake(&self, ctx: &Context) -> String {
+        let mut path = self.path.clone();
+        for mat in IGNORE_PATTERN
+            .get()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .find_iter(&self.path)
+        {
+            let flattened = ctx.flatten_variables();
+            let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
+            if let Ok(expr) = compiled {
+                let res = expr.execute(&flattened, GLOBAL_FUNCTIONS.get().unwrap());
+                if let Ok(Value::String(ret)) = res {
+                    path = path.replace(mat.as_str(), &ret);
+                }
+            }
+        }
+        return path;
     }
 
     pub fn bake_raw(&self, base_url: &str) -> String {
@@ -141,10 +161,11 @@ impl HttpReq {
         &self,
         base_url: &str,
         agent: &Agent,
+        ctx: &Context,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Option<HttpResponse> {
-        let path = self.bake(base_url);
+        let path = self.bake(ctx);
         if !path.is_empty() && !path.contains(base_url) {
             return None;
         }

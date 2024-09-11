@@ -2,7 +2,7 @@ use std::{rc::Rc, sync::Mutex};
 
 use crate::{
     cache::{Cache, RegexCache},
-    dsl::{CompiledExpression, DSLStack, Value},
+    dsl::{CompiledExpression, DSLStack, Value, GLOBAL_FUNCTIONS},
     http::{HttpReq, HttpResponse},
 };
 use regex::Regex;
@@ -136,16 +136,12 @@ impl Severity {
 }
 
 impl Matcher {
-    pub fn matches<F>(
+    pub fn matches(
         &self,
         data: &HttpResponse,
         regex_cache: &RegexCache,
-        functions: &FxHashMap<String, F>,
         context: &Context,
-    ) -> bool
-    where
-        F: Fn(&mut DSLStack) -> Result<(), ()>,
-    {
+    ) -> bool {
         if let MatcherType::Status(_) = self.r#type {
             return self.matches_status(data.status_code);
         }
@@ -182,21 +178,25 @@ impl Matcher {
                 let vars = context.flatten_variables();
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr.execute(&vars, &functions);
+                        let res = expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap());
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr.execute(&vars, &functions);
+                        let res = expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap());
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }
             }
             MatcherType::Regex(regexes) => {
                 if self.condition == Condition::OR {
-                    regexes.iter().any(|pattern| regex_cache.matches(*pattern, &data))
+                    regexes
+                        .iter()
+                        .any(|pattern| regex_cache.matches(*pattern, &data))
                 } else {
-                    regexes.iter().all(|pattern| regex_cache.matches(*pattern, &data))
+                    regexes
+                        .iter()
+                        .all(|pattern| regex_cache.matches(*pattern, &data))
                 }
             }
             MatcherType::Word(words) => {
@@ -218,19 +218,15 @@ impl Matcher {
 }
 
 impl HttpRequest {
-    pub fn execute<F>(
+    pub fn execute(
         &self,
         base_url: &str,
         agent: &Agent,
-        functions: &FxHashMap<String, F>,
         regex_cache: &RegexCache,
         parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
         cache: &mut Cache,
-    ) -> Vec<MatchResult>
-    where
-        F: Fn(&mut DSLStack) -> Result<(), ()>,
-    {
+    ) -> Vec<MatchResult> {
         // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
         let mut matches = Vec::new();
         let mut ctx = Context {
@@ -239,7 +235,7 @@ impl HttpRequest {
         };
 
         for (idx, req) in self.path.iter().enumerate() {
-            let maybe_resp = req.do_request(base_url, agent, req_counter, cache);
+            let maybe_resp = req.do_request(base_url, agent, &ctx, req_counter, cache);
             if let Some(resp) = maybe_resp {
                 ctx.variables.insert(
                     format!("body_{}", idx + 1),
@@ -269,7 +265,7 @@ impl HttpRequest {
                 );
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
-                    if matcher.negative ^ matcher.matches(&resp, regex_cache, functions, &ctx) {
+                    if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx) {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
                             internal: matcher.internal,
@@ -301,25 +297,28 @@ impl HttpRequest {
 }
 
 impl Template {
-    pub fn execute<F>(
+    pub fn execute(
         &self,
         base_url: &str,
         agent: &Agent,
         parent_ctx: Rc<Mutex<Context>>,
-        functions: &FxHashMap<String, F>,
         req_counter: &mut u32,
         cache: &mut Cache,
-        regex_cache: &RegexCache
-    ) where
-        F: Fn(&mut DSLStack) -> Result<(), ()>,
-    {
+        regex_cache: &RegexCache,
+    ) {
         let ctx = Rc::from(Mutex::from(Context {
             variables: FxHashMap::default(),
             parent: Some(parent_ctx),
         }));
         for http in self.http.iter() {
-            let match_results =
-                http.execute(base_url, agent, functions, regex_cache, ctx.clone(), req_counter, cache);
+            let match_results = http.execute(
+                base_url,
+                agent,
+                regex_cache,
+                ctx.clone(),
+                req_counter,
+                cache,
+            );
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever

@@ -1,7 +1,5 @@
 use std::{collections::HashMap, fmt::Debug, fs};
 
-use regex::Regex;
-use rustc_hash::FxHashMap;
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -171,7 +169,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
 pub fn parse_matcher(
     yaml: &Yaml,
     matchers_condition: Condition,
-    regex_cache: &mut RegexCache
+    regex_cache: &mut RegexCache,
 ) -> Result<Option<Matcher>, TemplateError> {
     let matcher_part = yaml["part"].as_str();
     let matcher_type = yaml["type"].as_str();
@@ -263,8 +261,10 @@ pub fn parse_matcher(
                 .map(|item| item.as_str().unwrap().to_string())
                 .collect();
 
-            let patterns: Vec<Result<u32, _>> =
-                regex_strings.iter().map(|patt| regex_cache.insert(patt)).collect();
+            let patterns: Vec<Result<u32, _>> = regex_strings
+                .iter()
+                .map(|patt| regex_cache.insert(patt))
+                .collect();
 
             if patterns.iter().any(|item| item.is_err()) {
                 let err = patterns.iter().find(|item| item.is_err()).cloned().unwrap();
@@ -492,7 +492,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
 pub struct TemplateLoader {
     pub loaded_templates: Vec<Template>,
     pub cache: Cache,
-    pub regex_cache: RegexCache
+    pub regex_cache: RegexCache,
 }
 
 impl TemplateLoader {

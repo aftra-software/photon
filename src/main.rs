@@ -6,9 +6,7 @@ mod template;
 mod template_loader;
 
 use std::{
-    fs,
-    sync::{Mutex, OnceLock},
-    time::Instant,
+    fs, rc::Rc, sync::{Mutex, OnceLock}, time::Instant
 };
 
 use clap::Parser;
@@ -18,8 +16,10 @@ use md5::{Digest, Md5};
 use parser::do_parsing;
 use regex::Regex;
 use rustc_hash::FxHashMap;
+use template::Context;
 use template_loader::TemplateLoader;
 use ureq::Agent;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -145,11 +145,26 @@ fn main() {
     let mut last_reqs = 0;
     let mut stopwatch = Instant::now();
 
+    let ctx = Rc::from(Mutex::from(Context {
+        variables: FxHashMap::default(),
+        parent: None
+    }));
+    {
+        let parsed: Result<Url, _> = base_url.parse();
+        if let Ok(url) = parsed {
+            if let Some(hostname) = url.host_str() {
+                ctx.lock().unwrap().variables.insert("hostname".to_string(), Value::String(hostname.to_string()));
+            }
+        }
+        ctx.lock().unwrap().variables.insert("BaseURL".to_string(), Value::String(base_url.to_string()));
+    }
+
     let template_len = templates.loaded_templates.len();
     for (i, template) in templates.loaded_templates.iter().enumerate() {
         template.execute(
             base_url,
             &request_agent,
+            ctx.clone(), // Cheap reference clone
             &functions,
             &mut reqs,
             &mut templates.cache,

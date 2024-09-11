@@ -420,6 +420,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "ureq",
+ "url",
  "walkdir",
  "yaml-rust2",
 ]

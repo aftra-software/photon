@@ -1,10 +1,11 @@
+use std::{rc::Rc, sync::Mutex};
+
 use crate::{
     cache::Cache,
     dsl::{CompiledExpression, DSLStack, Value},
     http::{HttpReq, HttpResponse},
 };
-use md5::{Digest, Md5};
-use regex::{Regex, RegexSet};
+use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use ureq::Agent;
 
@@ -79,9 +80,28 @@ pub struct HttpRequest {
     pub headers: Vec<(String, String)>, // TODO: use headers
 }
 
+// TODO: Maybe make this implement HashMap or something to not create a new temporary flattened each usage.
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
+    pub parent: Option<Rc<Mutex<Context>>>
+}
+
+impl Context {
+    // Returns a variable mapping, where the parent's variables have lower priority
+    // Than the current context's variables
+    // TODO: Probably incredibly slow
+    pub fn flatten_variables(&self) -> FxHashMap<String, Value> {
+        if self.parent.is_some() {
+            let mut variables = self.parent.as_ref().unwrap().lock().unwrap().flatten_variables();
+            for (k, v) in self.variables.iter() {
+                variables.insert(k.clone(), v.clone());
+            }
+            variables
+        } else {
+            self.variables.clone()
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -153,14 +173,15 @@ impl Matcher {
         };
         match &self.r#type {
             MatcherType::DSL(dsls) => {
+                let vars = context.flatten_variables();
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr.execute(&context.variables, &functions);
+                        let res = expr.execute(&vars, &functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr.execute(&context.variables, &functions);
+                        let res = expr.execute(&vars, &functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }
@@ -197,6 +218,7 @@ impl HttpRequest {
         base_url: &str,
         agent: &Agent,
         functions: &FxHashMap<String, F>,
+        parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Vec<MatchResult>
@@ -207,6 +229,7 @@ impl HttpRequest {
         let mut matches = Vec::new();
         let mut ctx = Context {
             variables: FxHashMap::default(),
+            parent: Some(parent_ctx)
         };
 
         for (idx, req) in self.path.iter().enumerate() {
@@ -276,14 +299,19 @@ impl Template {
         &self,
         base_url: &str,
         agent: &Agent,
+        parent_ctx: Rc<Mutex<Context>>,
         functions: &FxHashMap<String, F>,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) where
         F: Fn(&mut DSLStack) -> Result<(), ()>,
     {
+        let ctx = Rc::from(Mutex::from(Context {
+            variables: FxHashMap::default(),
+            parent: Some(parent_ctx)
+        }));
         for http in self.http.iter() {
-            let match_results = http.execute(base_url, agent, functions, req_counter, cache);
+            let match_results = http.execute(base_url, agent, functions, ctx.clone(), req_counter, cache);
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever

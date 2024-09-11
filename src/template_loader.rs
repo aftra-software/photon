@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, fs};
 
-use regex::{Regex, RegexSet};
+use regex::Regex;
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -10,7 +10,7 @@ use crate::{
     http::HttpReq,
     parser::compile_expression,
     template::{
-        Condition, HttpRequest, Info, Matcher, MatcherType, Method, RegexType, ResponsePart,
+        Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart,
         Severity, Template,
     },
     CONFIG,
@@ -90,7 +90,7 @@ fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
     match matcher_type.to_lowercase().as_str() {
         "word" => Some(MatcherType::Word(vec![])),
         "dsl" => Some(MatcherType::DSL(vec![])),
-        "regex" => Some(MatcherType::Regex(RegexType::PatternList(vec![]))),
+        "regex" => Some(MatcherType::Regex(vec![])),
         "status" => Some(MatcherType::Status(vec![])),
         _ => None,
     }
@@ -271,11 +271,7 @@ pub fn parse_matcher(
                     err.unwrap_err()
                 )));
             }
-            if condition == Condition::OR {
-                *regexes = RegexType::Set(RegexSet::new(regex_strings).unwrap());
-            } else {
-                *regexes = RegexType::PatternList(patterns.iter().flatten().cloned().collect())
-            }
+            *regexes = patterns.iter().flatten().cloned().collect()
         }
         MatcherType::Status(statuses) => {
             let status_list = yaml["status"].as_vec();
@@ -453,8 +449,13 @@ pub fn load_template(file: &str) -> Result<Template, TemplateError> {
 
     // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean 
     // for if that http request (defined right below) matched
-
     if !template_yaml["flow"].is_badvalue() {
+        if template_yaml["flow"].as_str().is_some() {
+            let dsl = compile_expression(template_yaml["flow"].as_str().unwrap());
+            //println!("{:?} - {}", dsl, template_yaml["flow"].as_str().unwrap());
+        } else {
+            return Err(TemplateError::InvalidValue("flow".into()))
+        }
         return Err(TemplateError::InvalidYaml);
     }
 

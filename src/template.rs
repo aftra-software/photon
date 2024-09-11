@@ -28,17 +28,12 @@ pub enum Method {
     OPTIONS,
 }
 
-#[derive(Debug)]
-pub enum RegexType {
-    PatternList(Vec<Regex>),
-    Set(RegexSet),
-}
 
 #[derive(Debug)]
 pub enum MatcherType {
     Word(Vec<String>),
     DSL(Vec<CompiledExpression>),
-    Regex(RegexType),
+    Regex(Vec<Regex>),
     Status(Vec<u8>),
 }
 
@@ -171,11 +166,12 @@ impl Matcher {
                 }
             }
             // TODO: Make sure Condition is taken into consideration
-            MatcherType::Regex(regexes) => match regexes {
-                RegexType::PatternList(patterns) => {
-                    patterns.iter().all(|pattern| pattern.is_match(&data))
+            MatcherType::Regex(regexes) => {
+                if self.condition == Condition::OR {
+                    regexes.iter().any(|pattern| pattern.is_match(&data))
+                } else {
+                    regexes.iter().all(|pattern| pattern.is_match(&data))
                 }
-                RegexType::Set(patterns) => patterns.is_match(&data),
             },
             MatcherType::Word(words) => {
                 if self.condition == Condition::OR {

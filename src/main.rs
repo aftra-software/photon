@@ -115,7 +115,7 @@ fn main() {
         }),
     );
 
-    GLOBAL_FUNCTIONS.set(functions);
+    GLOBAL_FUNCTIONS.set(functions).map_err(|_|()).unwrap();
 
     if CONFIG.get().unwrap().debug {
         let res = do_parsing(&fs::read_to_string(&args.test).unwrap());

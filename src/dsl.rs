@@ -379,7 +379,9 @@ impl DSLStack {
         if let Some(val) = self.inner.pop() {
             Ok(val)
         } else {
-            println!("Attempted to pop an empty stack");
+            if CONFIG.get().unwrap().debug {
+                println!("Attempted to pop an empty stack");
+            }
             Err(())
         }
     }
@@ -388,7 +390,9 @@ impl DSLStack {
         match self.pop()? {
             Value::Int(i) => Ok(i),
             other => {
-                println!("Attempted to pop an int but got {:?}", other);
+                if CONFIG.get().unwrap().debug {
+                    println!("Expected int but got {:?}", other);
+                }
                 Err(())
             }
         }
@@ -398,7 +402,9 @@ impl DSLStack {
         match self.pop()? {
             Value::Short(i) => Ok(i),
             other => {
-                println!("Attempted to pop a short but got {:?}", other);
+                if CONFIG.get().unwrap().debug {
+                    println!("Expected short but got {:?}", other);
+                }
                 Err(())
             }
         }
@@ -408,7 +414,9 @@ impl DSLStack {
         match self.pop()? {
             Value::Boolean(b) => Ok(b),
             other => {
-                println!("Attempted to pop a bool but got {:?}", other);
+                if CONFIG.get().unwrap().debug {
+                    println!("Expected bool but got {:?}", other);
+                }
                 Err(())
             }
         }
@@ -418,7 +426,9 @@ impl DSLStack {
         match self.pop()? {
             Value::String(s) => Ok(s),
             other => {
-                println!("Attempted to pop a string but got {:?}", other);
+                if CONFIG.get().unwrap().debug {
+                    println!("Expected string but got {:?}", other);
+                }
                 Err(())
             }
         }

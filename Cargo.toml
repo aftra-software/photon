@@ -8,9 +8,8 @@ opt-level = 1
 
 [profile.release]
 lto = "thin"
-#strip = true
-debug = true
-#panic = "abort"
+strip = true
+panic = "abort"
 opt-level = 3
 codegen-units = 1
 

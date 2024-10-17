@@ -1,3 +1,4 @@
+use core::str;
 use std::{rc::Rc, sync::Mutex};
 
 use crate::{
@@ -5,6 +6,7 @@ use crate::{
     dsl::{CompiledExpression, Value, GLOBAL_FUNCTIONS},
     http::{HttpReq, HttpResponse},
 };
+use curl::easy::{Easy2, Handler, List, WriteError};
 use rustc_hash::{FxHashMap, FxHashSet};
 use ureq::Agent;
 
@@ -34,7 +36,7 @@ pub enum MatcherType {
     Word(Vec<String>),
     DSL(Vec<CompiledExpression>),
     Regex(Vec<u32>), // indicies into RegexCache
-    Status(Vec<u8>),
+    Status(Vec<u32>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -210,7 +212,7 @@ impl Matcher {
             _ => false,
         }
     }
-    pub fn matches_status(&self, status: u8) -> bool {
+    pub fn matches_status(&self, status: u32) -> bool {
         match &self.r#type {
             MatcherType::Status(statuses) => statuses.iter().any(|s| *s == status),
             _ => panic!("Cannot match status when type != MatcherType::Status"),
@@ -223,6 +225,7 @@ impl HttpRequest {
         &self,
         base_url: &str,
         agent: &Agent,
+        curl: &mut Easy2<Collector>,
         regex_cache: &RegexCache,
         parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
@@ -236,7 +239,7 @@ impl HttpRequest {
         };
 
         for (idx, req) in self.path.iter().enumerate() {
-            let maybe_resp = req.do_request(base_url, agent, &ctx, req_counter, cache);
+            let maybe_resp = req.do_request(base_url, agent, curl, &ctx, req_counter, cache);
             if let Some(resp) = maybe_resp {
                 ctx.variables.insert(
                     format!("body_{}", idx + 1),
@@ -297,11 +300,26 @@ impl HttpRequest {
     }
 }
 
+pub struct Collector(pub Vec<u8>, pub Vec<String>);
+
+impl Handler for Collector {
+    fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+        self.0.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn header(&mut self, data: &[u8]) -> bool {
+        self.1.push(String::from_utf8_lossy(data).to_string());
+        true
+    }
+}
+
 impl Template {
     pub fn execute(
         &self,
         base_url: &str,
         agent: &Agent,
+        curl: &mut Easy2<Collector>,
         parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
         cache: &mut Cache,
@@ -315,6 +333,7 @@ impl Template {
             let match_results = http.execute(
                 base_url,
                 agent,
+                curl,
                 regex_cache,
                 ctx.clone(),
                 req_counter,

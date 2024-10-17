@@ -280,10 +280,10 @@ pub fn parse_matcher(
             if status_list.is_none() {
                 return Err(TemplateError::MissingField("status".into()));
             }
-            let mut status_values: Vec<u8> = status_list
+            let mut status_values: Vec<u32> = status_list
                 .unwrap()
                 .iter()
-                .map(|item| item.as_i64().unwrap() as u8)
+                .map(|item| item.as_i64().unwrap() as u32)
                 .collect();
             statuses.append(&mut status_values);
         }
@@ -362,6 +362,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 method,
                 path: item.as_str().unwrap().to_string(),
                 raw: "".into(),
+                headers: Vec::new(),
             })
             .collect()
     } else if yaml["path"].as_str().is_some() {
@@ -373,6 +374,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 method,
                 path: item.to_string(),
                 raw: "".into(),
+                headers: Vec::new(),
             })
             .collect()
     } else {
@@ -388,6 +390,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 method,
                 path: "".into(),
                 raw: item.as_str().unwrap().to_string(),
+                headers: Vec::new(),
             })
             .collect()
     } else if yaml["raw"].as_str().is_some() {
@@ -395,6 +398,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             method,
             path: "".into(),
             raw: yaml["raw"].as_str().unwrap().into(),
+            headers: Vec::new(),
         }]
     } else {
         vec![]

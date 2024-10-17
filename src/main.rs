@@ -5,6 +5,7 @@ mod parser;
 mod template;
 mod template_loader;
 
+use core::str;
 use std::{
     fs,
     rc::Rc,
@@ -13,13 +14,14 @@ use std::{
 };
 
 use clap::Parser;
+use curl::easy::Easy2;
 use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, DslFunc, Value, GLOBAL_FUNCTIONS};
 use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
 use parser::do_parsing;
 use regex::Regex;
 use rustc_hash::FxHashMap;
-use template::Context;
+use template::{Collector, Context};
 use template_loader::TemplateLoader;
 use ureq::Agent;
 use url::Url;
@@ -147,6 +149,7 @@ fn main() {
 
     let base_url = &args.url;
     let request_agent = Agent::new();
+    let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
 
     let mut reqs = 0;
     let mut last_reqs = 0;
@@ -177,6 +180,7 @@ fn main() {
         template.execute(
             base_url,
             &request_agent,
+            &mut curl,
             ctx.clone(), // Cheap reference clone
             &mut reqs,
             &mut templates.cache,

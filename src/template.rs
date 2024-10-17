@@ -2,10 +2,9 @@ use std::{rc::Rc, sync::Mutex};
 
 use crate::{
     cache::{Cache, RegexCache},
-    dsl::{CompiledExpression, DSLStack, Value, GLOBAL_FUNCTIONS},
+    dsl::{CompiledExpression, Value, GLOBAL_FUNCTIONS},
     http::{HttpReq, HttpResponse},
 };
-use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use ureq::Agent;
 

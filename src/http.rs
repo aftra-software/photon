@@ -4,7 +4,6 @@ use std::{
 };
 
 use regex::Regex;
-use rustc_hash::FxHashMap;
 use ureq::{Agent, Response};
 
 use crate::{

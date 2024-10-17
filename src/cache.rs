@@ -85,7 +85,7 @@ impl RegexCache {
             self.patterns.push(Regex::new(patt)?);
             Ok(idx as u32)
         } else {
-            Ok(*self.known.get(&patt.to_string()).unwrap())
+            Ok(*self.known.get(patt).unwrap())
         }
     }
 

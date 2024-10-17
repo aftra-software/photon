@@ -13,7 +13,7 @@ use std::{
 };
 
 use clap::Parser;
-use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value, GLOBAL_FUNCTIONS};
+use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, DslFunc, Value, GLOBAL_FUNCTIONS};
 use http::IGNORE_PATTERN;
 use md5::{Digest, Md5};
 use parser::do_parsing;
@@ -67,7 +67,7 @@ fn main() {
 
     let mut functions: FxHashMap<
         String,
-        Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>,
+        DslFunc,
     > = FxHashMap::default();
 
     functions.insert(

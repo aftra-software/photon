@@ -19,6 +19,7 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Method {
     GET,
     POST,
@@ -45,6 +46,7 @@ pub enum ResponsePart {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Condition {
     AND,
     OR,

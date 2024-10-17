@@ -451,6 +451,8 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
 
     // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean
     // for if that http request (defined right below) matched
+    // EDIT: The flow is actually JavaScript, which we don't really care for, HOWEVER, most of them should be parseable by us
+    // e.g. flow(1) && flow(2) ... 
     if !template_yaml["flow"].is_badvalue() {
         if template_yaml["flow"].as_str().is_some() {
             let dsl = compile_expression(template_yaml["flow"].as_str().unwrap());
@@ -503,22 +505,20 @@ impl TemplateLoader {
         let mut loaded_templates = Vec::new();
         let mut regex_cache = RegexCache::new();
 
-        for entry_res in WalkDir::new(path) {
-            if let Ok(entry) = entry_res {
-                if entry.file_type().is_file()
-                    && entry.path().extension().is_some()
-                    && (entry.path().extension().unwrap() == "yml"
-                        || entry.path().extension().unwrap() == "yaml")
-                {
-                    let template = load_template(entry.path().to_str().unwrap(), &mut regex_cache);
-                    if template.is_ok() {
-                        success += 1;
-                        loaded_templates.push(template.unwrap());
-                    } else if CONFIG.get().unwrap().debug {
-                        println!("{:?} - {}", template, entry.path().to_str().unwrap());
-                    }
-                    total += 1;
+        for entry in WalkDir::new(path).into_iter().flatten() {
+            if entry.file_type().is_file()
+                && entry.path().extension().is_some()
+                && (entry.path().extension().unwrap() == "yml"
+                    || entry.path().extension().unwrap() == "yaml")
+            {
+                let template = load_template(entry.path().to_str().unwrap(), &mut regex_cache);
+                if template.is_ok() {
+                    success += 1;
+                    loaded_templates.push(template.unwrap());
+                } else if CONFIG.get().unwrap().debug {
+                    println!("{:?} - {}", template, entry.path().to_str().unwrap());
                 }
+                total += 1;
             }
         }
         if CONFIG.get().unwrap().debug {

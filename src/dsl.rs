@@ -6,8 +6,10 @@ use rustc_hash::FxHashMap;
 
 use crate::CONFIG;
 
+pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
+
 pub static GLOBAL_FUNCTIONS: OnceLock<
-    FxHashMap<String, Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Sync + Send>>,
+    FxHashMap<String, DslFunc>,
 > = OnceLock::new();
 
 #[derive(Debug, Copy, Clone)]
@@ -657,9 +659,9 @@ where
             }
             Bytecode::Instr(op) => {
                 let res = handle_op(*op, &mut stack);
-                if res.is_err() {
+                if let Err(err) = res {
                     return {
-                        res.unwrap_err();
+                        // TODO: return the err
                         Err(())
                     };
                 }

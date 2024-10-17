@@ -83,8 +83,8 @@ fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
         Rule::variable => Expr::Variable(primary.as_str().to_string()),
         Rule::digit => {
             let num = primary.as_str();
-            if num.starts_with("0x") {
-                Expr::Constant(Value::Int(i64::from_str_radix(&num[2..], 16).unwrap()))
+            if let Some(stripped) = num.strip_prefix("0x") {
+                Expr::Constant(Value::Int(i64::from_str_radix(stripped, 16).unwrap()))
             } else {
                 Expr::Constant(Value::Int(num.parse::<i64>().unwrap()))
             }

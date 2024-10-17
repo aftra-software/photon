@@ -1,6 +1,6 @@
 use core::str;
 use std::{
-    sync::{Mutex, OnceLock}, time::Instant
+    sync::{Mutex, OnceLock}, time::{Duration, Instant}
 };
 
 use curl::easy::{Easy2, List};
@@ -102,6 +102,7 @@ impl HttpReq {
 
         // Setup CURL context for this request
         curl.path_as_is(true).unwrap();
+        curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
         curl.url(path).unwrap();
 
         match self.method {
@@ -158,7 +159,7 @@ impl HttpReq {
         let resp = HttpResponse {
             body: body.to_string(),
             status_code: curl.response_code().unwrap(),
-            duration: duration, // Filled in later
+            duration,
             headers: Vec::new()
         };
 

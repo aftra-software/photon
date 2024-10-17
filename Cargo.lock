@@ -473,6 +473,7 @@ dependencies = [
  "base16ct",
  "clap",
  "curl",
+ "curl-sys",
  "httparse",
  "lazy_static",
  "md-5",

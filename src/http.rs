@@ -4,6 +4,7 @@ use std::{
 };
 
 use curl::easy::{Easy2, List};
+use curl_sys::CURLOPT_CUSTOMREQUEST;
 use regex::Regex;
 use ureq::{Agent, Response};
 
@@ -81,10 +82,9 @@ impl HttpReq {
     fn internal_request(
         &self,
         path: &str,
-        agent: &Agent,
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
-    ) -> Option<(Response, f32)> {
+    ) -> Option<HttpResponse> {
         let pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(path) {
             return None;
@@ -96,18 +96,51 @@ impl HttpReq {
         // TODO: CURL Error Handling
 
         // Reset CURL context from last request
+        curl.get_mut().reset(); // Reset collector
         curl.reset(); // Reset handle to initial state, keeping connections open
         curl.cookie_list("ALL").unwrap(); // Reset stored cookies
 
         // Setup CURL context for this request
         curl.path_as_is(true).unwrap();
         curl.url(path).unwrap();
+
+        match self.method {
+            Method::GET => {
+                curl.get(true).unwrap();
+            },
+            Method::POST => {
+                curl.post(true).unwrap();
+            },
+            // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
+            // So we interact with the raw curl handle manually, and set the request type to "custom"
+            Method::DELETE => {
+                unsafe {
+                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
+                }
+            },
+            Method::HEAD => {
+                unsafe {
+                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
+                }
+            },
+            Method::OPTIONS => {
+                unsafe {
+                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
+                }
+            },
+            Method::PATCH => {
+                unsafe {
+                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
+                }
+            }
+        }
+
         let mut headers = List::new();
         for header in self.headers.iter() {
             headers.append(&header).unwrap();
         }
         curl.http_headers(headers).unwrap();
-
+        
         // Perform CURL request
         if let Err(err) = curl.perform() {
             if CONFIG.get().unwrap().verbose {
@@ -117,32 +150,19 @@ impl HttpReq {
             // Failed, no resp
             return None;
         }
+        let duration = stopwatch.elapsed().as_secs_f32();
 
         let contents = curl.get_ref();
         let body = String::from_utf8_lossy(&contents.0);
-
+        
         let resp = HttpResponse {
             body: body.to_string(),
             status_code: curl.response_code().unwrap(),
-            duration: 0.0, // Filled in later
+            duration: duration, // Filled in later
             headers: Vec::new()
         };
 
-        let res = agent.get(path).call();
-        let duration = stopwatch.elapsed().as_secs_f32();
-        match res {
-            Err(err) => match err {
-                ureq::Error::Status(_, resp) => Some((resp, duration)),
-                _ => {
-                    if CONFIG.get().unwrap().verbose {
-                        println!("Err: {}", err);
-                        println!("    - {}", path);
-                    }
-                    None
-                }
-            },
-            Ok(resp) => Some((resp, duration)),
-        }
+        Some(resp)
     }
 
     fn raw_request(
@@ -219,18 +239,18 @@ impl HttpReq {
         // Skip caching below if we know the request is only happening once
         let key = CacheKey(self.method, self.path.clone());
         if !cache.can_cache(&key) {
-            let res = self.internal_request(&path, agent, curl, req_counter);
+            let res = self.internal_request(&path, curl, req_counter);
             if let Some(resp) = res {
-                return Some(parse_response(resp.0, resp.1));
+                return Some(resp);
             } else {
                 return None;
             }
         }
 
         if !cache.contains(&key) {
-            let res = self.internal_request(&path, agent, curl, req_counter);
+            let res = self.internal_request(&path, curl, req_counter);
             if let Some(resp) = res {
-                cache.store(&key, Some(parse_response(resp.0, resp.1)));
+                cache.store(&key, Some(resp));
             } else {
                 cache.store(&key, None);
             }

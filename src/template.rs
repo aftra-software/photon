@@ -6,7 +6,7 @@ use crate::{
     dsl::{CompiledExpression, Value, GLOBAL_FUNCTIONS},
     http::{HttpReq, HttpResponse},
 };
-use curl::easy::{Easy2, Handler, List, WriteError};
+use curl::easy::{Easy2, Handler, WriteError};
 use rustc_hash::{FxHashMap, FxHashSet};
 use ureq::Agent;
 
@@ -251,6 +251,11 @@ impl HttpRequest {
                     format!("status_code_{}", idx + 1),
                     Value::Int(resp.status_code as i64),
                 );
+                // TODO: Should this be a Float?
+                ctx.variables.insert(
+                    "duration".to_string(),
+                    Value::Int(resp.duration as i64),
+                );
                 ctx.variables.insert(
                     "status_code".to_string(),
                     Value::Int(resp.status_code as i64),
@@ -300,7 +305,7 @@ impl HttpRequest {
     }
 }
 
-pub struct Collector(pub Vec<u8>, pub Vec<String>);
+pub struct Collector(pub Vec<u8>, pub Vec<u8>);
 
 impl Handler for Collector {
     fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
@@ -309,9 +314,16 @@ impl Handler for Collector {
     }
 
     fn header(&mut self, data: &[u8]) -> bool {
-        self.1.push(String::from_utf8_lossy(data).to_string());
+        self.1.extend_from_slice(data);
         true
     }
+}
+
+impl Collector {
+    pub fn reset(&mut self) {
+        self.0.clear();
+        self.1.clear();
+    } 
 }
 
 impl Template {

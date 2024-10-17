@@ -14,7 +14,7 @@ use crate::{
     CONFIG,
 };
 
-pub static IGNORE_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
+pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -51,7 +51,7 @@ impl HttpReq {
         let mut path = self.path.clone();
         // TODO: Do this repeatedly, continue matching and replacing until nothing can be replaced again
         // Pattern always matches inner-most brackets, so we need to do it multiple times
-        for mat in IGNORE_PATTERN
+        for mat in BRACKET_PATTERN
             .get()
             .unwrap()
             .lock()
@@ -82,7 +82,7 @@ impl HttpReq {
         agent: &Agent,
         req_counter: &mut u32,
     ) -> Option<(Response, f32)> {
-        let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
+        let pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(path) {
             return None;
         }
@@ -126,7 +126,7 @@ impl HttpReq {
 
         let res = req.parse(baked_raw.as_bytes());
 
-        let pattern = IGNORE_PATTERN.get().unwrap().lock().unwrap();
+        let pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
         if pattern.is_match(&baked_raw) {
             return None;
         }

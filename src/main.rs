@@ -14,7 +14,7 @@ use std::{
 
 use clap::Parser;
 use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, DslFunc, Value, GLOBAL_FUNCTIONS};
-use http::IGNORE_PATTERN;
+use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
 use parser::do_parsing;
 use regex::Regex;
@@ -54,7 +54,7 @@ struct Config {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn main() {
-    let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
+    let _ = BRACKET_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
 
     let args = Args::parse();
 

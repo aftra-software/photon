@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use regex::Regex;
 use rustc_hash::FxHashMap;
@@ -79,13 +79,13 @@ impl RegexCache {
     }
 
     pub fn insert(&mut self, patt: &str) -> Result<u32, regex::Error> {
-        if self.known.contains_key(&patt.to_string()) {
-            Ok(*self.known.get(&patt.to_string()).unwrap())
-        } else {
+        if let Entry::Vacant(e) = self.known.entry(patt.to_string()) {
             let idx = self.patterns.len();
-            self.known.insert(patt.to_string(), idx as u32);
+            e.insert(idx as u32);
             self.patterns.push(Regex::new(patt)?);
             Ok(idx as u32)
+        } else {
+            Ok(*self.known.get(&patt.to_string()).unwrap())
         }
     }
 

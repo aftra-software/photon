@@ -137,7 +137,7 @@ fn main() {
                     ("input".into(), Value::String("Hello".into())),
                     ("test".into(), Value::Boolean(true)),
                 ]),
-                &GLOBAL_FUNCTIONS.get().unwrap(),
+                GLOBAL_FUNCTIONS.get().unwrap(),
             );
             println!("Output from executed bytecode: {:?}", res);
         }

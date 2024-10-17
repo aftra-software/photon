@@ -211,9 +211,9 @@ pub(crate) fn optimize_expr(expr: Expr) -> Expr {
         }
         Expr::Function(name, args) => Expr::Function(
             name,
-            args.into_iter().map(|arg| optimize_expr(arg)).collect(),
+            args.into_iter().map(optimize_expr).collect(),
         ),
-        Expr::List(args) => Expr::List(args.into_iter().map(|arg| optimize_expr(arg)).collect()),
+        Expr::List(args) => Expr::List(args.into_iter().map(optimize_expr).collect()),
         _ => expr,
     }
 }
@@ -658,7 +658,10 @@ where
             Bytecode::Instr(op) => {
                 let res = handle_op(*op, &mut stack);
                 if res.is_err() {
-                    return Err(res.unwrap_err());
+                    return {
+                        res.unwrap_err();
+                        Err(())
+                    };
                 }
             }
             Bytecode::Value(_) => {

@@ -64,7 +64,7 @@ impl HttpReq {
                 }
             }
         }
-        return path;
+        path
     }
 
     pub fn bake_raw(&self, base_url: &str) -> String {

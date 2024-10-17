@@ -8,7 +8,6 @@ use crate::{
 };
 use curl::easy::{Easy2, Handler, WriteError};
 use rustc_hash::{FxHashMap, FxHashSet};
-use ureq::Agent;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Severity {
@@ -224,7 +223,6 @@ impl HttpRequest {
     pub fn execute(
         &self,
         base_url: &str,
-        agent: &Agent,
         curl: &mut Easy2<Collector>,
         regex_cache: &RegexCache,
         parent_ctx: Rc<Mutex<Context>>,
@@ -239,7 +237,7 @@ impl HttpRequest {
         };
 
         for (idx, req) in self.path.iter().enumerate() {
-            let maybe_resp = req.do_request(base_url, agent, curl, &ctx, req_counter, cache);
+            let maybe_resp = req.do_request(base_url, curl, &ctx, req_counter, cache);
             if let Some(resp) = maybe_resp {
                 ctx.variables.insert(
                     format!("body_{}", idx + 1),
@@ -330,7 +328,6 @@ impl Template {
     pub fn execute(
         &self,
         base_url: &str,
-        agent: &Agent,
         curl: &mut Easy2<Collector>,
         parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
@@ -344,7 +341,6 @@ impl Template {
         for http in self.http.iter() {
             let match_results = http.execute(
                 base_url,
-                agent,
                 curl,
                 regex_cache,
                 ctx.clone(),

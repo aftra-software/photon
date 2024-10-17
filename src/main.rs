@@ -23,7 +23,6 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 use template::{Collector, Context};
 use template_loader::TemplateLoader;
-use ureq::Agent;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -148,7 +147,6 @@ fn main() {
     let mut templates = TemplateLoader::load_from_path(&args.templates);
 
     let base_url = &args.url;
-    let request_agent = Agent::new();
     let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
 
     let mut reqs = 0;
@@ -179,7 +177,6 @@ fn main() {
     for (i, template) in templates.loaded_templates.iter().enumerate() {
         template.execute(
             base_url,
-            &request_agent,
             &mut curl,
             ctx.clone(), // Cheap reference clone
             &mut reqs,

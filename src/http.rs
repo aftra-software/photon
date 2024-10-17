@@ -6,7 +6,6 @@ use std::{
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
 use regex::Regex;
-use ureq::{Agent, Response};
 
 use crate::{
     cache::{Cache, CacheKey},
@@ -32,20 +31,6 @@ pub struct HttpReq {
     pub headers: Vec<String>,
     pub path: String,
     pub raw: String,
-}
-
-fn parse_response(inp: Response, duration: f32) -> HttpResponse {
-    let headers: Vec<(String, String)> = inp
-        .headers_names()
-        .iter()
-        .map(|name| (name.clone(), inp.header(name).unwrap().to_string()))
-        .collect();
-    HttpResponse {
-        headers,
-        status_code: inp.status() as u32,
-        body: inp.into_string().unwrap(),
-        duration,
-    }
 }
 
 impl HttpReq {
@@ -169,13 +154,13 @@ impl HttpReq {
     fn raw_request(
         &self,
         base_url: &str,
-        agent: &Agent,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
         return None;
         // TODO: implement and handle better, needs more string replacements to work and such
         // e.g. {{Hostname}}
         // Also need to send the actual raw request
+        /*
         let mut headers = [httparse::EMPTY_HEADER; 32];
         let mut req = httparse::Request::new(&mut headers);
         let baked_raw = self.bake_raw(base_url);
@@ -216,13 +201,12 @@ impl HttpReq {
                 }
             }
             Err(_) => None,
-        }
+        } */
     }
 
     pub fn do_request(
         &self,
         base_url: &str,
-        agent: &Agent,
         curl: &mut Easy2<Collector>,
         ctx: &Context,
         req_counter: &mut u32,
@@ -234,7 +218,7 @@ impl HttpReq {
         }
 
         if !self.raw.is_empty() {
-            return self.raw_request(base_url, agent, req_counter);
+            return self.raw_request(base_url, req_counter);
         }
 
         // Skip caching below if we know the request is only happening once

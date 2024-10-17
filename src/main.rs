@@ -54,7 +54,7 @@ struct Config {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn main() {
-    let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^}]*}}").unwrap()));
+    let _ = IGNORE_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
 
     let args = Args::parse();
 

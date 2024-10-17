@@ -46,8 +46,11 @@ fn parse_response(inp: Response, duration: f32) -> HttpResponse {
 }
 
 impl HttpReq {
+    /// Bakes the request with variables from `ctx`, returning the populated request path.
     pub fn bake(&self, ctx: &Context) -> String {
         let mut path = self.path.clone();
+        // TODO: Do this repeatedly, continue matching and replacing until nothing can be replaced again
+        // Pattern always matches inner-most brackets, so we need to do it multiple times
         for mat in IGNORE_PATTERN
             .get()
             .unwrap()

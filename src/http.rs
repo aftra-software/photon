@@ -1,12 +1,13 @@
 use core::str;
 use std::{
-    sync::{Mutex, OnceLock},
-    time::{Duration, Instant},
+    mem::{self, ManuallyDrop}, os::fd::FromRawFd, sync::{Mutex, OnceLock}, time::{Duration, Instant}
 };
 
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
+use mio::{net::TcpStream, Events, Interest, Poll, Token};
 use regex::Regex;
+use socket2::Socket;
 
 use crate::{
     cache::{Cache, CacheKey},
@@ -36,6 +37,7 @@ pub struct HttpReq {
 
 fn bake_ctx(inp: &String, ctx: &Context) -> String {
     let mut baked = inp.clone();
+    let flattened = ctx.flatten_variables();
     loop {
         let tmp = baked.clone();
         let matches: Vec<regex::Match<'_>> = BRACKET_PATTERN
@@ -48,7 +50,6 @@ fn bake_ctx(inp: &String, ctx: &Context) -> String {
 
         let mut updated = 0;
         for mat in matches.iter() {
-            let flattened = ctx.flatten_variables();
             let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&flattened, GLOBAL_FUNCTIONS.get().unwrap());
@@ -67,7 +68,6 @@ fn bake_ctx(inp: &String, ctx: &Context) -> String {
 }
 
 impl HttpReq {
-
     /// Bakes the request with variables from `ctx`, returning the populated request path.
     pub fn bake(&self, ctx: &Context) -> String {
         bake_ctx(&self.path, ctx)
@@ -128,7 +128,7 @@ impl HttpReq {
 
         let mut headers = List::new();
         for header in self.headers.iter() {
-            headers.append(&header).unwrap();
+            headers.append(header).unwrap();
         }
         curl.http_headers(headers).unwrap();
 
@@ -174,18 +174,60 @@ impl HttpReq {
         curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
 
         let raw_data = self.bake_raw(ctx);
-
+        if let Value::String(hostname) = ctx.flatten_variables().get("Hostname").unwrap() {
+            if !raw_data.contains(hostname) {
+                // We don't want to do this request, expected hostname is missing
+                return None;
+            }
+        }
         println!("raw req: {raw_data}");
 
+        if let Err(err) = curl.url(base_url) {
+            eprintln!("CURL url error: {:?}", err);
+            return None;
+        }
+        if let Err(err) = curl.perform() {
+            eprintln!("CURL connect error: {:?}", err);
+            return None;
+        }
+        
         let res = curl.send(raw_data.as_bytes());
         println!("res: {:?}", res);
 
-        let contents = curl.get_ref();
-        let body = String::from_utf8_lossy(&contents.0);
+        // TODO: cross-platform compatibility
+        // AFAIK this is the only part of the program that's not cross-platform compatible
+        // Socket::from_raw_fd is only available on UNIX
+
+        let mut poll = Poll::new().unwrap();
+        // Create storage for events.
+        let mut events = Events::with_capacity(8);
+
+        unsafe {
+            let raw_curl = curl.raw();
+            let mut raw_socket: i32 = 0;
+            let info = curl_sys::curl_easy_getinfo(raw_curl, 0x500000 + 44, &mut raw_socket);
+            println!("socket I hope: {}", raw_socket);
+            if info != curl_sys::CURLE_OK {
+                println!("easy getinfo not ok?: {:?}", info);
+            }
+            let mut client = TcpStream::from_raw_fd(raw_socket);
+            
+            poll.registry()
+            .register(&mut client, Token(0), Interest::READABLE).unwrap();
+        
+            poll.poll(&mut events, None).unwrap();
+            //mem::forget(client); // We don't want to call `Drop` in `TcpStream`, since it does not actually own the socket
+        }
+        
+        let mut resp = Vec::new();
+        let recvd = curl.recv(&mut resp);
+        println!("recvd: {:?}", recvd);
+
+        let body = String::from_utf8_lossy(&resp);
 
         println!("body: '{}'", body);
 
-        return None;
+        None
         // TODO: implement and handle better, needs more string replacements to work and such
         // e.g. {{Hostname}}
         // Also need to send the actual raw request

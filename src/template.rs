@@ -250,10 +250,8 @@ impl HttpRequest {
                     Value::Int(resp.status_code as i64),
                 );
                 // TODO: Should this be a Float?
-                ctx.variables.insert(
-                    "duration".to_string(),
-                    Value::Int(resp.duration as i64),
-                );
+                ctx.variables
+                    .insert("duration".to_string(), Value::Int(resp.duration as i64));
                 ctx.variables.insert(
                     "status_code".to_string(),
                     Value::Int(resp.status_code as i64),
@@ -321,7 +319,7 @@ impl Collector {
     pub fn reset(&mut self) {
         self.0.clear();
         self.1.clear();
-    } 
+    }
 }
 
 impl Template {
@@ -339,14 +337,8 @@ impl Template {
             parent: Some(parent_ctx),
         }));
         for http in self.http.iter() {
-            let match_results = http.execute(
-                base_url,
-                curl,
-                regex_cache,
-                ctx.clone(),
-                req_counter,
-                cache,
-            );
+            let match_results =
+                http.execute(base_url, curl, regex_cache, ctx.clone(), req_counter, cache);
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever

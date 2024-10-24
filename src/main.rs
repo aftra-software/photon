@@ -66,10 +66,7 @@ fn main() {
 
     let now = Instant::now();
 
-    let mut functions: FxHashMap<
-        String,
-        DslFunc,
-    > = FxHashMap::default();
+    let mut functions: FxHashMap<String, DslFunc> = FxHashMap::default();
 
     functions.insert(
         "md5".into(),
@@ -116,7 +113,7 @@ fn main() {
         }),
     );
 
-    GLOBAL_FUNCTIONS.set(functions).map_err(|_|()).unwrap();
+    GLOBAL_FUNCTIONS.set(functions).map_err(|_| ()).unwrap();
 
     if CONFIG.get().unwrap().debug {
         let res = do_parsing(&fs::read_to_string(&args.test).unwrap());
@@ -157,14 +154,18 @@ fn main() {
         variables: FxHashMap::default(),
         parent: None,
     }));
+    // TODO: Should this be handled inside of `http.rs`?
     {
         let parsed: Result<Url, _> = base_url.parse();
         if let Ok(url) = parsed {
             if let Some(hostname) = url.host_str() {
-                ctx.lock()
-                    .unwrap()
+                let mut locked = ctx.lock().unwrap();
+                locked
                     .variables
                     .insert("hostname".to_string(), Value::String(hostname.to_string()));
+                locked
+                    .variables
+                    .insert("Hostname".to_string(), Value::String(hostname.to_string()));
             }
         }
         ctx.lock()

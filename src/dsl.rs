@@ -8,9 +8,7 @@ use crate::CONFIG;
 
 pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
 
-pub static GLOBAL_FUNCTIONS: OnceLock<
-    FxHashMap<String, DslFunc>,
-> = OnceLock::new();
+pub static GLOBAL_FUNCTIONS: OnceLock<FxHashMap<String, DslFunc>> = OnceLock::new();
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -211,10 +209,9 @@ pub(crate) fn optimize_expr(expr: Expr) -> Expr {
             }
             Expr::Prefix(op, Box::new(optimized))
         }
-        Expr::Function(name, args) => Expr::Function(
-            name,
-            args.into_iter().map(optimize_expr).collect(),
-        ),
+        Expr::Function(name, args) => {
+            Expr::Function(name, args.into_iter().map(optimize_expr).collect())
+        }
         Expr::List(args) => Expr::List(args.into_iter().map(optimize_expr).collect()),
         _ => expr,
     }

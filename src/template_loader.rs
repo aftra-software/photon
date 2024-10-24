@@ -432,9 +432,14 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
 
     requests.append(&mut raw);
 
-    let flattened_headers: Vec<String> = headers.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+    let flattened_headers: Vec<String> = headers
+        .iter()
+        .map(|(k, v)| format!("{}: {}", k, v))
+        .collect();
 
-    requests.iter_mut().for_each(|req| req.headers = flattened_headers.clone());
+    requests
+        .iter_mut()
+        .for_each(|req| req.headers = flattened_headers.clone());
 
     Ok(HttpRequest {
         matchers_condition,
@@ -460,7 +465,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
     // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean
     // for if that http request (defined right below) matched
     // EDIT: The flow is actually JavaScript, which we don't really care for, HOWEVER, most of them should be parseable by us
-    // e.g. flow(1) && flow(2) ... 
+    // e.g. flow(1) && flow(2) ...
     if !template_yaml["flow"].is_badvalue() {
         if template_yaml["flow"].as_str().is_some() {
             let dsl = compile_expression(template_yaml["flow"].as_str().unwrap());

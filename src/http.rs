@@ -1,6 +1,7 @@
 use core::str;
 use std::{
-    sync::{Mutex, OnceLock}, time::{Duration, Instant}
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use curl::easy::{Easy2, List};
@@ -33,35 +34,47 @@ pub struct HttpReq {
     pub raw: String,
 }
 
-impl HttpReq {
-    /// Bakes the request with variables from `ctx`, returning the populated request path.
-    pub fn bake(&self, ctx: &Context) -> String {
-        let mut path = self.path.clone();
-        // TODO: Do this repeatedly, continue matching and replacing until nothing can be replaced again
-        // Pattern always matches inner-most brackets, so we need to do it multiple times
-        for mat in BRACKET_PATTERN
+fn bake_ctx(inp: &String, ctx: &Context) -> String {
+    let mut baked = inp.clone();
+    loop {
+        let tmp = baked.clone();
+        let matches: Vec<regex::Match<'_>> = BRACKET_PATTERN
             .get()
             .unwrap()
             .lock()
             .unwrap()
-            .find_iter(&self.path)
-        {
+            .find_iter(tmp.as_str())
+            .collect();
+
+        let mut updated = 0;
+        for mat in matches.iter() {
             let flattened = ctx.flatten_variables();
             let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&flattened, GLOBAL_FUNCTIONS.get().unwrap());
                 if let Ok(Value::String(ret)) = res {
-                    path = path.replace(mat.as_str(), &ret);
+                    baked = baked.replace(mat.as_str(), &ret);
+                    updated += 1;
                 }
             }
         }
-        path
+        // End condition, when no more patterns match/can be replaced
+        if updated == 0 {
+            break;
+        }
+    }
+    baked
+}
+
+impl HttpReq {
+
+    /// Bakes the request with variables from `ctx`, returning the populated request path.
+    pub fn bake(&self, ctx: &Context) -> String {
+        bake_ctx(&self.path, ctx)
     }
 
-    pub fn bake_raw(&self, base_url: &str) -> String {
-        self.raw
-            .replace("{{BaseURL}}", base_url)
-            .replace("HTTP/2", "HTTP/1.1")
+    pub fn bake_raw(&self, ctx: &Context) -> String {
+        bake_ctx(&self.raw, ctx)
     }
 
     fn internal_request(
@@ -93,32 +106,24 @@ impl HttpReq {
         match self.method {
             Method::GET => {
                 curl.get(true).unwrap();
-            },
+            }
             Method::POST => {
                 curl.post(true).unwrap();
-            },
+            }
             // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
             // So we interact with the raw curl handle manually, and set the request type to "custom"
-            Method::DELETE => {
-                unsafe {
-                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
-                }
+            Method::DELETE => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
             },
-            Method::HEAD => {
-                unsafe {
-                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
-                }
+            Method::HEAD => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
             },
-            Method::OPTIONS => {
-                unsafe {
-                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
-                }
+            Method::OPTIONS => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
             },
-            Method::PATCH => {
-                unsafe {
-                    curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
-                }
-            }
+            Method::PATCH => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
+            },
         }
 
         let mut headers = List::new();
@@ -126,7 +131,7 @@ impl HttpReq {
             headers.append(&header).unwrap();
         }
         curl.http_headers(headers).unwrap();
-        
+
         // Perform CURL request
         if let Err(err) = curl.perform() {
             if CONFIG.get().unwrap().verbose {
@@ -140,12 +145,12 @@ impl HttpReq {
 
         let contents = curl.get_ref();
         let body = String::from_utf8_lossy(&contents.0);
-        
+
         let resp = HttpResponse {
             body: body.to_string(),
             status_code: curl.response_code().unwrap(),
             duration,
-            headers: Vec::new()
+            headers: Vec::new(),
         };
 
         Some(resp)
@@ -154,8 +159,32 @@ impl HttpReq {
     fn raw_request(
         &self,
         base_url: &str,
+        ctx: &Context,
+        curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
+        println!("HI RAW");
+        // Reset CURL context from last request
+        curl.get_mut().reset(); // Reset collector
+        curl.reset(); // Reset handle to initial state, keeping connections open
+        curl.connect_only(true).unwrap();
+
+        // Setup CURL context for this request
+        curl.path_as_is(true).unwrap(); // TODO: Not sure if needed
+        curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
+
+        let raw_data = self.bake_raw(ctx);
+
+        println!("raw req: {raw_data}");
+
+        let res = curl.send(raw_data.as_bytes());
+        println!("res: {:?}", res);
+
+        let contents = curl.get_ref();
+        let body = String::from_utf8_lossy(&contents.0);
+
+        println!("body: '{}'", body);
+
         return None;
         // TODO: implement and handle better, needs more string replacements to work and such
         // e.g. {{Hostname}}
@@ -212,13 +241,14 @@ impl HttpReq {
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Option<HttpResponse> {
-        let path = self.bake(ctx);
-        if !path.is_empty() && !path.contains(base_url) {
-            return None;
+        if !self.raw.is_empty() {
+            return self.raw_request(base_url, ctx, curl, req_counter);
         }
 
-        if !self.raw.is_empty() {
-            return self.raw_request(base_url, req_counter);
+        let path = self.bake(ctx);
+        // TODO: maybe || now that raw is checked above
+        if !path.is_empty() && !path.contains(base_url) {
+            return None;
         }
 
         // Skip caching below if we know the request is only happening once

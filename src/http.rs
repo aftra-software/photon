@@ -1,13 +1,10 @@
 use core::str;
-use std::{
-    mem::{self, ManuallyDrop}, os::fd::FromRawFd, sync::{Mutex, OnceLock}, time::{Duration, Instant}
+use std::{sync::{Mutex, OnceLock}, thread::sleep, time::{Duration, Instant}
 };
 
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
-use mio::{net::TcpStream, Events, Interest, Poll, Token};
 use regex::Regex;
-use socket2::Socket;
 
 use crate::{
     cache::{Cache, CacheKey},
@@ -18,6 +15,9 @@ use crate::{
 };
 
 pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
+
+// How long to sleep in our busy-loop between checks if we can read from a socket
+const SLEEP_DURATION: Duration = Duration::from_nanos(1000); // 1/1000th of a millisecond
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -163,116 +163,90 @@ impl HttpReq {
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        println!("HI RAW");
         // Reset CURL context from last request
-        curl.get_mut().reset(); // Reset collector
+        //curl.get_mut().reset(); // Reset collector
         curl.reset(); // Reset handle to initial state, keeping connections open
         curl.connect_only(true).unwrap();
 
         // Setup CURL context for this request
-        curl.path_as_is(true).unwrap(); // TODO: Not sure if needed
-        curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
+        //curl.path_as_is(true).unwrap(); // TODO: Not sure if needed
+        //curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
 
-        let raw_data = self.bake_raw(ctx);
+        let mut raw_data = self.bake_raw(ctx);
         if let Value::String(hostname) = ctx.flatten_variables().get("Hostname").unwrap() {
             if !raw_data.contains(hostname) {
                 // We don't want to do this request, expected hostname is missing
                 return None;
             }
         }
+        
+        // 2x newline represent end of request in HTTP
+        while !raw_data.ends_with("\n\n") {
+            raw_data.push('\n');
+        }
+
         println!("raw req: {raw_data}");
 
         if let Err(err) = curl.url(base_url) {
-            eprintln!("CURL url error: {:?}", err);
+            if CONFIG.get().unwrap().verbose {
+                eprintln!("CURL url error: {:?}", err);
+            }
             return None;
         }
         if let Err(err) = curl.perform() {
-            eprintln!("CURL connect error: {:?}", err);
+            if CONFIG.get().unwrap().verbose {
+                eprintln!("CURL connect error: {:?}", err);
+            }
             return None;
         }
-        
-        let res = curl.send(raw_data.as_bytes());
-        println!("res: {:?}", res);
 
-        // TODO: cross-platform compatibility
-        // AFAIK this is the only part of the program that's not cross-platform compatible
-        // Socket::from_raw_fd is only available on UNIX
-
-        let mut poll = Poll::new().unwrap();
-        // Create storage for events.
-        let mut events = Events::with_capacity(8);
-
-        unsafe {
-            let raw_curl = curl.raw();
-            let mut raw_socket: i32 = 0;
-            let info = curl_sys::curl_easy_getinfo(raw_curl, 0x500000 + 44, &mut raw_socket);
-            println!("socket I hope: {}", raw_socket);
-            if info != curl_sys::CURLE_OK {
-                println!("easy getinfo not ok?: {:?}", info);
+        let mut sent = 0;
+        let target_sent = raw_data.as_bytes().len();
+        loop {
+            match curl.send(&raw_data.as_bytes()[sent..]) {
+                Err(err) => {
+                    if CONFIG.get().unwrap().verbose {
+                        eprintln!("CURL send error: {:?}", err);
+                    }
+                    return None;
+                }
+                Ok(amnt) => {
+                    sent += amnt;
+                    if sent == target_sent {
+                        break;
+                    }
+                }
             }
-            let mut client = TcpStream::from_raw_fd(raw_socket);
-            
-            poll.registry()
-            .register(&mut client, Token(0), Interest::READABLE).unwrap();
-        
-            poll.poll(&mut events, None).unwrap();
-            //mem::forget(client); // We don't want to call `Drop` in `TcpStream`, since it does not actually own the socket
         }
+        *req_counter += 1;
         
         let mut resp = Vec::new();
-        let recvd = curl.recv(&mut resp);
-        println!("recvd: {:?}", recvd);
+        loop {
+            let mut resp_buf = [0u8; 4096]; // Receive 4KB at a time and push into `resp`
+            let recvd = curl.recv(&mut resp_buf);
+            match recvd {
+                Ok(0) => {
+                    break
+                },
+                Ok(len) => {
+                    resp.extend_from_slice(&resp_buf[..len]);
+                }
+                Err(err) => {
+                    if err.is_again() {
+                        sleep(SLEEP_DURATION);
+                    } else {
+                        println!("DIFFERENT ERROR: {:?}", err);
+                        break;
+                    }
+                }
+            }
+        }
 
         let body = String::from_utf8_lossy(&resp);
 
         println!("body: '{}'", body);
 
         None
-        // TODO: implement and handle better, needs more string replacements to work and such
-        // e.g. {{Hostname}}
-        // Also need to send the actual raw request
-        /*
-        let mut headers = [httparse::EMPTY_HEADER; 32];
-        let mut req = httparse::Request::new(&mut headers);
-        let baked_raw = self.bake_raw(base_url);
-
-        if !baked_raw.is_empty() && !baked_raw.contains(base_url) {
-            return None;
-        }
-
-        let res = req.parse(baked_raw.as_bytes());
-
-        let pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
-        if pattern.is_match(&baked_raw) {
-            return None;
-        }
-
-        match res {
-            Ok(_) => {
-                if req.method.is_some() && req.path.is_some() {
-                    *req_counter += 1;
-                    let stopwatch = Instant::now();
-                    let resp = agent.request(req.method.unwrap(), req.path.unwrap()).call();
-                    let duration = stopwatch.elapsed().as_secs_f32();
-                    match resp {
-                        Err(err) => match err {
-                            ureq::Error::Status(_, resp) => Some(parse_response(resp, duration)),
-                            _ => {
-                                if CONFIG.get().unwrap().verbose {
-                                    println!("Err: {}", err);
-                                    println!("    - {}", req.path.unwrap());
-                                }
-                                None
-                            }
-                        },
-                        Ok(resp) => Some(parse_response(resp, duration)),
-                    }
-                } else {
-                    None
-                }
-            }
-            Err(_) => None,
-        } */
     }
 
     pub fn do_request(

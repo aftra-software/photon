@@ -175,6 +175,11 @@ fn main() {
     }
 
     let template_len = templates.loaded_templates.len();
+
+    if template_len == 0 {
+        println!("No templates loaded!")
+    }
+
     for (i, template) in templates.loaded_templates.iter().enumerate() {
         template.execute(
             base_url,

@@ -310,7 +310,10 @@ impl Handler for Collector {
     }
 
     fn header(&mut self, data: &[u8]) -> bool {
-        self.1.extend_from_slice(data);
+        // Make sure we're appending headers only, curl also gives us the HTTP response code header as well for some reason
+        if data.contains(&b':') {
+            self.1.extend_from_slice(data);
+        }
         true
     }
 }

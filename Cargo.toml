@@ -21,7 +21,6 @@ curl-sys = "0.4.77"
 httparse = "1.9.4"
 lazy_static = "1.5.0"
 md-5 = "0.10.6"
-mio = { version = "1.0.2", default-features = false, features = ["net", "os-poll"] }
 pest = "2.7.11"
 pest_derive = "2.7.11"
 regex = "1.10.6"

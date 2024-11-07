@@ -1,9 +1,12 @@
 use core::str;
-use std::{sync::{Mutex, OnceLock}, thread::sleep, time::{Duration, Instant}
+use std::{
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
+use httparse::Status;
 use regex::Regex;
 
 use crate::{
@@ -15,9 +18,6 @@ use crate::{
 };
 
 pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
-
-// How long to sleep in our busy-loop between checks if we can read from a socket
-const SLEEP_DURATION: Duration = Duration::from_nanos(1000); // 1/1000th of a millisecond
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
@@ -35,7 +35,7 @@ pub struct HttpReq {
     pub raw: String,
 }
 
-fn bake_ctx(inp: &String, ctx: &Context) -> String {
+fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
     let mut baked = inp.clone();
     let flattened = ctx.flatten_variables();
     loop {
@@ -61,19 +61,43 @@ fn bake_ctx(inp: &String, ctx: &Context) -> String {
         }
         // End condition, when no more patterns match/can be replaced
         if updated == 0 {
+            if matches.len() > 0 {
+                if CONFIG.get().unwrap().verbose {
+                    // TODO: Better message?
+                    eprintln!("Skipping request, {} missing parameters", matches.len());
+                }
+                return None; // There's more to match that we couldn't match, invalid request
+            }
             break;
         }
     }
-    baked
+
+    Some(baked)
+}
+
+fn parse_headers(contents: &Vec<u8>) -> Vec<(String, String)> {
+    String::from_utf8_lossy(&contents)
+        .split('\n')
+        .filter(|chunk| chunk.len() > 0)
+        .map(|a| {
+            if let Some((key, value)) = a.split_once(':') {
+                (key.to_string(), value.trim().to_string())
+            } else {
+                // If this happens we're doing something wrong, just panic at that point
+                println!("Offending header: {a}");
+                panic!("Error splitting header, shouldn't happen ever! If you see this report as bug!");
+            }
+        })
+        .collect()
 }
 
 impl HttpReq {
     /// Bakes the request with variables from `ctx`, returning the populated request path.
-    pub fn bake(&self, ctx: &Context) -> String {
+    pub fn bake(&self, ctx: &Context) -> Option<String> {
         bake_ctx(&self.path, ctx)
     }
 
-    pub fn bake_raw(&self, ctx: &Context) -> String {
+    pub fn bake_raw(&self, ctx: &Context) -> Option<String> {
         bake_ctx(&self.raw, ctx)
     }
 
@@ -83,12 +107,6 @@ impl HttpReq {
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
-        if pattern.is_match(path) {
-            return None;
-        }
-
-        *req_counter += 1;
         let stopwatch = Instant::now();
 
         // TODO: CURL Error Handling
@@ -141,16 +159,19 @@ impl HttpReq {
             // Failed, no resp
             return None;
         }
+        *req_counter += 1;
+
         let duration = stopwatch.elapsed().as_secs_f32();
 
         let contents = curl.get_ref();
         let body = String::from_utf8_lossy(&contents.0);
+        let headers = parse_headers(&contents.1);
 
         let resp = HttpResponse {
             body: body.to_string(),
             status_code: curl.response_code().unwrap(),
             duration,
-            headers: Vec::new(),
+            headers,
         };
 
         Some(resp)
@@ -163,90 +184,128 @@ impl HttpReq {
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        // Reset CURL context from last request
-        //curl.get_mut().reset(); // Reset collector
-        curl.reset(); // Reset handle to initial state, keeping connections open
-        curl.connect_only(true).unwrap();
-
-        // Setup CURL context for this request
-        //curl.path_as_is(true).unwrap(); // TODO: Not sure if needed
-        //curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
-
-        let mut raw_data = self.bake_raw(ctx);
+        let mut raw_data = self.bake_raw(ctx)?;
         if let Value::String(hostname) = ctx.flatten_variables().get("Hostname").unwrap() {
             if !raw_data.contains(hostname) {
                 // We don't want to do this request, expected hostname is missing
                 return None;
             }
         }
-        
-        // 2x newline represent end of request in HTTP
+
+        // Makes parsing that much more reliable, since HTTP requests end with two newlines
         while !raw_data.ends_with("\n\n") {
             raw_data.push('\n');
         }
 
-        println!("raw req: {raw_data}");
-
-        if let Err(err) = curl.url(base_url) {
+        let mut headers = [httparse::EMPTY_HEADER; 64];
+        let mut req = httparse::Request::new(&mut headers);
+        let parsed = req.parse(raw_data.as_bytes());
+        if let Err(err) = parsed {
             if CONFIG.get().unwrap().verbose {
-                eprintln!("CURL url error: {:?}", err);
+                eprintln!(
+                    "Error parsing raw request: {} - request: '{}'",
+                    err, raw_data
+                );
             }
             return None;
         }
+
+        let len = match parsed.unwrap() {
+            Status::Complete(len) => len,
+            Status::Partial => raw_data.len(), // Shouldn't happen, but if it does, we should still have parsed the entire request
+        };
+
+        let body = &raw_data[len..];
+
+        if let None = req.path {
+            if CONFIG.get().unwrap().verbose {
+                eprintln!("Error: Raw request parsed 'path' missing");
+            }
+            return None;
+        }
+
+        let stopwatch = Instant::now();
+
+        // TODO: CURL Error Handling
+
+        // Reset CURL context from last request
+        curl.get_mut().reset(); // Reset collector
+        curl.reset(); // Reset handle to initial state, keeping connections open
+        curl.cookie_list("ALL").unwrap(); // Reset stored cookies
+
+        // Setup CURL context for this request
+        curl.path_as_is(true).unwrap();
+        curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
+        curl.url(&format!("{}{}", base_url, req.path.unwrap()))
+            .unwrap();
+        
+
+        match self.method {
+            Method::GET => {
+                curl.get(true).unwrap();
+            }
+            Method::POST => {
+                curl.post(true).unwrap();
+            }
+            // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
+            // So we interact with the raw curl handle manually, and set the request type to "custom"
+            Method::DELETE => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
+            },
+            Method::HEAD => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
+            },
+            Method::OPTIONS => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
+            },
+            Method::PATCH => unsafe {
+                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
+            },
+        }
+
+        let mut headers = List::new();
+        for header in req.headers {
+            let val_str = str::from_utf8(header.value);
+            if val_str.is_err() {
+                if CONFIG.get().unwrap().verbose {
+                    eprintln!(
+                        "Error: header value cannot be converted to string - {:x?}",
+                        header.value
+                    );
+                }
+                return None;
+            }
+            headers
+                .append(&format!("{}: {}", header.name, val_str.unwrap()))
+                .unwrap();
+        }
+        curl.http_headers(headers).unwrap();
+
+        // Perform CURL request
         if let Err(err) = curl.perform() {
             if CONFIG.get().unwrap().verbose {
-                eprintln!("CURL connect error: {:?}", err);
+                println!("Error requesting URL: {}", req.path.unwrap());
+                println!("err: {}", err);
             }
+            // Failed, no resp
             return None;
         }
-
-        let mut sent = 0;
-        let target_sent = raw_data.as_bytes().len();
-        loop {
-            match curl.send(&raw_data.as_bytes()[sent..]) {
-                Err(err) => {
-                    if CONFIG.get().unwrap().verbose {
-                        eprintln!("CURL send error: {:?}", err);
-                    }
-                    return None;
-                }
-                Ok(amnt) => {
-                    sent += amnt;
-                    if sent == target_sent {
-                        break;
-                    }
-                }
-            }
-        }
         *req_counter += 1;
-        
-        let mut resp = Vec::new();
-        loop {
-            let mut resp_buf = [0u8; 4096]; // Receive 4KB at a time and push into `resp`
-            let recvd = curl.recv(&mut resp_buf);
-            match recvd {
-                Ok(0) => {
-                    break
-                },
-                Ok(len) => {
-                    resp.extend_from_slice(&resp_buf[..len]);
-                }
-                Err(err) => {
-                    if err.is_again() {
-                        sleep(SLEEP_DURATION);
-                    } else {
-                        println!("DIFFERENT ERROR: {:?}", err);
-                        break;
-                    }
-                }
-            }
-        }
 
-        let body = String::from_utf8_lossy(&resp);
+        let duration = stopwatch.elapsed().as_secs_f32();
 
-        println!("body: '{}'", body);
+        let contents = curl.get_ref();
+        let body = String::from_utf8_lossy(&contents.0);
+        let headers = parse_headers(&contents.1);
 
-        None
+        let resp = HttpResponse {
+            body: body.to_string(),
+            status_code: curl.response_code().unwrap(),
+            duration,
+            headers,
+        };
+
+        Some(resp)
     }
 
     pub fn do_request(
@@ -261,9 +320,8 @@ impl HttpReq {
             return self.raw_request(base_url, ctx, curl, req_counter);
         }
 
-        let path = self.bake(ctx);
-        // TODO: maybe || now that raw is checked above
-        if !path.is_empty() && !path.contains(base_url) {
+        let path = self.bake(ctx)?;
+        if path.is_empty() || !path.contains(base_url) {
             return None;
         }
 

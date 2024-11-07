@@ -115,11 +115,17 @@ impl HttpReq {
         curl.get_mut().reset(); // Reset collector
         curl.reset(); // Reset handle to initial state, keeping connections open
         curl.cookie_list("ALL").unwrap(); // Reset stored cookies
+        curl.useragent("Photon/0.1").unwrap(); // TODO: Allow customization
 
         // Setup CURL context for this request
         curl.path_as_is(true).unwrap();
         curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
         curl.url(path).unwrap();
+
+        // TODO: Make sure Template loader loads body
+        //if body.len() > 0 {
+        //    curl.post_fields_copy(body.as_bytes()).unwrap();
+        //}
 
         match self.method {
             Method::GET => {
@@ -226,12 +232,13 @@ impl HttpReq {
 
         let stopwatch = Instant::now();
 
-        // TODO: CURL Error Handling
+        // TODO: Merge with CURL handling code above, since it's nearly identical
 
         // Reset CURL context from last request
         curl.get_mut().reset(); // Reset collector
         curl.reset(); // Reset handle to initial state, keeping connections open
         curl.cookie_list("ALL").unwrap(); // Reset stored cookies
+        curl.useragent("Photon/0.1").unwrap(); // TODO: Allow customization
 
         // Setup CURL context for this request
         curl.path_as_is(true).unwrap();
@@ -239,6 +246,9 @@ impl HttpReq {
         curl.url(&format!("{}{}", base_url, req.path.unwrap()))
             .unwrap();
         
+        if body.len() > 0 {
+            curl.post_fields_copy(body.as_bytes()).unwrap();
+        }
 
         match self.method {
             Method::GET => {

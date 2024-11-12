@@ -3,10 +3,10 @@ use std::{rc::Rc, sync::Mutex};
 
 use crate::{
     cache::{Cache, RegexCache},
-    dsl::{CompiledExpression, Value, GLOBAL_FUNCTIONS},
     http::{HttpReq, HttpResponse},
 };
 use curl::easy::{Easy2, Handler, WriteError};
+use photon_dsl::{dsl::{CompiledExpression, Value}, GLOBAL_FUNCTIONS};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy)]

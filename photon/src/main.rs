@@ -1,7 +1,5 @@
 mod cache;
-mod dsl;
 mod http;
-mod parser;
 mod template;
 mod template_loader;
 
@@ -15,10 +13,9 @@ use std::{
 
 use clap::Parser;
 use curl::easy::Easy2;
-use dsl::{bytecode_to_binary, compile_bytecode, DSLStack, DslFunc, Value, GLOBAL_FUNCTIONS};
 use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
-use parser::do_parsing;
+use photon_dsl::{dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value}, parser::do_parsing, set_config, DslFunc, GLOBAL_FUNCTIONS};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use template::{Collector, Context};
@@ -63,6 +60,11 @@ fn main() {
         verbose: args.verbose,
         debug: args.debug,
     });
+
+    // Set same config in DSL lib
+    // TODO: make config more similar to CURL, where we do things like
+    // photon_dsl::set_debug(true)
+    set_config(photon_dsl::Config { verbose: args.verbose, debug: args.debug });
 
     let now = Instant::now();
 

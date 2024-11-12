@@ -7,12 +7,11 @@ use std::{
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
 use httparse::Status;
+use photon_dsl::{dsl::Value, parser::compile_expression, GLOBAL_FUNCTIONS};
 use regex::Regex;
 
 use crate::{
     cache::{Cache, CacheKey},
-    dsl::{Value, GLOBAL_FUNCTIONS},
-    parser::compile_expression,
     template::{Collector, Context, Method},
     CONFIG,
 };

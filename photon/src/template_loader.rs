@@ -1,13 +1,12 @@
 use std::{collections::HashMap, fmt::Debug, fs};
 
+use photon_dsl::{dsl::CompiledExpression, parser::compile_expression};
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
     cache::{Cache, CacheKey, RegexCache},
-    dsl::CompiledExpression,
     http::HttpReq,
-    parser::compile_expression,
     template::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
         Template,

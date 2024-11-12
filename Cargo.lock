@@ -552,13 +552,22 @@ dependencies = [
  "curl-sys",
  "httparse",
  "md-5",
- "pest",
- "pest_derive",
+ "photon_dsl",
  "regex",
  "rustc-hash",
  "url",
  "walkdir",
  "yaml-rust2",
+]
+
+[[package]]
+name = "photon_dsl"
+version = "0.1.0"
+dependencies = [
+ "pest",
+ "pest_derive",
+ "regex",
+ "rustc-hash",
 ]
 
 [[package]]

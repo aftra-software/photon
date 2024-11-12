@@ -1,14 +1,9 @@
 use core::panic;
-use std::sync::OnceLock;
 
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
 use crate::CONFIG;
-
-pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
-
-pub static GLOBAL_FUNCTIONS: OnceLock<FxHashMap<String, DslFunc>> = OnceLock::new();
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -58,7 +53,7 @@ pub enum OPCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Value {
+pub enum Value {
     String(String),
     Int(i64),
     Short(i16),

@@ -59,7 +59,7 @@ static PRATT_PARSER: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
         .op(Op::prefix(not) | Op::prefix(neg) | Op::prefix(bitnot))
 });
 
-fn my_unescape(s: &str) -> Result<String, ()> {
+fn unescape(s: &str) -> Result<String, ()> {
     let mut ins = s.chars();
     let mut out = String::with_capacity(s.len());
 
@@ -84,7 +84,7 @@ fn my_unescape(s: &str) -> Result<String, ()> {
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
     match primary.as_rule() {
         Rule::clause => parse_expr(primary.into_inner()),
-        Rule::string => Expr::Constant(Value::String(my_unescape(primary.as_str()).unwrap())),
+        Rule::string => Expr::Constant(Value::String(unescape(primary.as_str()).unwrap())),
         Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
         Rule::variable => Expr::Variable(primary.as_str().to_string()),
         Rule::digit => {

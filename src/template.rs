@@ -78,7 +78,6 @@ pub struct HttpRequest {
     pub matchers: Vec<Matcher>,
     pub matchers_condition: Condition,
     pub path: Vec<HttpReq>,
-    pub headers: Vec<(String, String)>, // TODO: use headers
 }
 
 // TODO: Maybe make this implement HashMap or something to not create a new temporary flattened each usage.

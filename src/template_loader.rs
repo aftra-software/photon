@@ -303,6 +303,7 @@ pub fn parse_matcher(
 
 pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpRequest, TemplateError> {
     let http_method = yaml["method"].as_str();
+    let http_body = yaml["body"].as_str();
     let http_matchers = yaml["matchers"].as_vec();
 
     if http_matchers.is_none() {
@@ -317,6 +318,12 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         method_ret.unwrap()
     } else {
         Method::GET
+    };
+
+    let body = if http_body.is_some() {
+        http_body.unwrap().to_string()
+    } else {
+        String::from("")
     };
 
     let matchers_condition = if yaml["matchers-condition"].is_badvalue() {
@@ -360,6 +367,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .iter()
             .map(|item| HttpReq {
                 method,
+                body: body.clone(),
                 path: item.as_str().unwrap().to_string(),
                 raw: "".into(),
                 headers: Vec::new(),
@@ -372,6 +380,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .split_terminator('\n')
             .map(|item| HttpReq {
                 method,
+                body: body.clone(),
                 path: item.to_string(),
                 raw: "".into(),
                 headers: Vec::new(),
@@ -388,6 +397,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .iter()
             .map(|item| HttpReq {
                 method,
+                body: body.clone(),
                 path: "".into(),
                 raw: item.as_str().unwrap().to_string(),
                 headers: Vec::new(),
@@ -396,6 +406,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     } else if yaml["raw"].as_str().is_some() {
         vec![HttpReq {
             method,
+            body: body.clone(),
             path: "".into(),
             raw: yaml["raw"].as_str().unwrap().into(),
             headers: Vec::new(),
@@ -444,7 +455,6 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     Ok(HttpRequest {
         matchers_condition,
         matchers,
-        headers,
         path: requests,
     })
 }

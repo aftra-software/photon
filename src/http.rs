@@ -32,6 +32,7 @@ pub struct HttpReq {
     pub method: Method,
     pub headers: Vec<String>,
     pub path: String,
+    pub body: String,
     pub raw: String,
 }
 
@@ -122,10 +123,9 @@ impl HttpReq {
         curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
         curl.url(path).unwrap();
 
-        // TODO: Make sure Template loader loads body
-        //if body.len() > 0 {
-        //    curl.post_fields_copy(body.as_bytes()).unwrap();
-        //}
+        if self.body.len() > 0 {
+            curl.post_fields_copy(self.body.as_bytes()).unwrap();
+        }
 
         match self.method {
             Method::GET => {

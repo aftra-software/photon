@@ -86,13 +86,21 @@ fn parse_headers(contents: &Vec<u8>) -> Vec<(String, String)> {
             } else {
                 // If this happens we're doing something wrong, just panic at that point
                 println!("Offending header: {a}");
-                panic!("Error splitting header, shouldn't happen ever! If you see this report as bug!");
+                panic!(
+                    "Error splitting header, shouldn't happen ever! If you see this report as bug!"
+                );
             }
         })
         .collect()
 }
 
-fn curl_do_request(curl: &mut Easy2<Collector>, path: &str, body: &[u8], headers: &[String], method: Method) -> Option<HttpResponse> {
+fn curl_do_request(
+    curl: &mut Easy2<Collector>,
+    path: &str,
+    body: &[u8],
+    headers: &[String],
+    method: Method,
+) -> Option<HttpResponse> {
     // TODO: CURL Error Handling
 
     // Reset CURL context from last request
@@ -103,6 +111,7 @@ fn curl_do_request(curl: &mut Easy2<Collector>, path: &str, body: &[u8], headers
 
     // Setup CURL context for this request
     curl.path_as_is(true).unwrap();
+    curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
     curl.url(path).unwrap();
 
@@ -251,8 +260,7 @@ impl HttpReq {
                 }
                 return None;
             }
-            headers
-                .push(format!("{}: {}", header.name, val_str.unwrap()));
+            headers.push(format!("{}: {}", header.name, val_str.unwrap()));
         }
 
         let resp = curl_do_request(curl, &path, body.as_bytes(), &self.headers, self.method);
@@ -281,7 +289,7 @@ impl HttpReq {
         }
 
         // Skip caching below if we know the request is only happening once
-        let key = CacheKey(self.method, self.path.clone());
+        let key = CacheKey(self.method, self.headers.clone(), self.path.clone());
         if !cache.can_cache(&key) {
             let res = self.internal_request(&path, curl, req_counter);
             if let Some(resp) = res {

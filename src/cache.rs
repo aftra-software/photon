@@ -6,7 +6,8 @@ use rustc_hash::FxHashMap;
 use crate::{http::HttpResponse, template::Method};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct CacheKey(pub Method, pub String);
+// (Method, Headers, Path)
+pub struct CacheKey(pub Method, pub Vec<String>, pub String);
 
 pub struct Cache {
     inner: HashMap<CacheKey, Option<HttpResponse>>,

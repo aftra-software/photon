@@ -16,6 +16,7 @@ use crate::{
 };
 
 #[derive(Debug)]
+#[allow(dead_code)] // We never explicitly read from the inner fields, only debug log
 pub enum TemplateError {
     MissingField(String),
     InvalidValue(String),
@@ -558,7 +559,11 @@ impl TemplateLoader {
             for http in template.http.iter() {
                 for request in http.path.iter() {
                     tokens
-                        .entry(CacheKey(request.method, request.path.clone()))
+                        .entry(CacheKey(
+                            request.method,
+                            request.headers.clone(),
+                            request.path.clone(),
+                        ))
                         .and_modify(|val| *val += 1)
                         .or_insert(1);
                 }

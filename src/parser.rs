@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use pest::{
     iterators::{Pair, Pairs},
     pratt_parser::PrattParser,
@@ -29,29 +31,33 @@ pub fn do_parsing(data: &str) -> Result<Expr, ()> {
     Ok(optimize_expr(expr))
 }
 
-lazy_static::lazy_static! {
-    static ref PRATT_PARSER: PrattParser<Rule> = {
-        use pest::pratt_parser::{Assoc::*, Op};
-        use Rule::*;
+static PRATT_PARSER: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
+    use pest::pratt_parser::{Assoc::*, Op};
+    use Rule::*;
 
-        // Precedence is defined lowest to highest
-        PrattParser::new()
-            // Addition and subtract have equal precedence
-            .op(Op::infix(or, Left))
-            .op(Op::infix(and, Left))
-            .op(Op::infix(bitor, Left))
-            .op(Op::infix(xor, Left))
-            .op(Op::infix(bitand, Left))
-            .op(Op::infix(eq, Left) | Op::infix(neq, Left) | Op::infix(regexeq, Left) | Op::infix(regexneq, Left))
-            .op(Op::infix(gt, Left) | Op::infix(gteq, Left) | Op::infix(lt, Left) | Op::infix(lteq, Left))
-            .op(Op::infix(shl, Left) | Op::infix(shr, Left))
-            .op(Op::infix(add, Left) | Op::infix(sub, Left))
-            .op(Op::infix(mul, Left) | Op::infix(div, Left) | Op::infix(r#mod, Left))
-            .op(Op::infix(r#in, Left))
-            .op(Op::infix(exp, Left))
-            .op(Op::prefix(not) | Op::prefix(neg) | Op::prefix(bitnot))
-        };
-}
+    // Precedence is defined lowest to highest
+    PrattParser::new()
+        // Addition and subtract have equal precedence
+        .op(Op::infix(or, Left))
+        .op(Op::infix(and, Left))
+        .op(Op::infix(bitor, Left))
+        .op(Op::infix(xor, Left))
+        .op(Op::infix(bitand, Left))
+        .op(Op::infix(eq, Left)
+            | Op::infix(neq, Left)
+            | Op::infix(regexeq, Left)
+            | Op::infix(regexneq, Left))
+        .op(Op::infix(gt, Left)
+            | Op::infix(gteq, Left)
+            | Op::infix(lt, Left)
+            | Op::infix(lteq, Left))
+        .op(Op::infix(shl, Left) | Op::infix(shr, Left))
+        .op(Op::infix(add, Left) | Op::infix(sub, Left))
+        .op(Op::infix(mul, Left) | Op::infix(div, Left) | Op::infix(r#mod, Left))
+        .op(Op::infix(r#in, Left))
+        .op(Op::infix(exp, Left))
+        .op(Op::prefix(not) | Op::prefix(neg) | Op::prefix(bitnot))
+});
 
 fn my_unescape(s: &str) -> Result<String, ()> {
     let mut ins = s.chars();

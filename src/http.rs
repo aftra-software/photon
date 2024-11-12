@@ -92,6 +92,80 @@ fn parse_headers(contents: &Vec<u8>) -> Vec<(String, String)> {
         .collect()
 }
 
+fn curl_do_request(curl: &mut Easy2<Collector>, path: &str, body: &[u8], headers: &[String], method: Method) -> Option<HttpResponse> {
+    // TODO: CURL Error Handling
+
+    // Reset CURL context from last request
+    curl.get_mut().reset(); // Reset collector
+    curl.reset(); // Reset handle to initial state, keeping connections open
+    curl.cookie_list("ALL").unwrap(); // Reset stored cookies
+    curl.useragent("Photon/0.1").unwrap(); // TODO: Allow customization
+
+    // Setup CURL context for this request
+    curl.path_as_is(true).unwrap();
+    curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
+    curl.url(path).unwrap();
+
+    if body.len() > 0 {
+        curl.post_fields_copy(body).unwrap();
+    }
+
+    match method {
+        Method::GET => {
+            curl.get(true).unwrap();
+        }
+        Method::POST => {
+            curl.post(true).unwrap();
+        }
+        // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
+        // So we interact with the raw curl handle manually, and set the request type to "custom"
+        Method::DELETE => unsafe {
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
+        },
+        Method::HEAD => unsafe {
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
+        },
+        Method::OPTIONS => unsafe {
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
+        },
+        Method::PATCH => unsafe {
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
+        },
+    }
+
+    let mut parsed_headers = List::new();
+    for header in headers.iter() {
+        parsed_headers.append(header).unwrap();
+    }
+    curl.http_headers(parsed_headers).unwrap();
+
+    let stopwatch = Instant::now();
+    // Perform CURL request
+    if let Err(err) = curl.perform() {
+        if CONFIG.get().unwrap().verbose {
+            println!("Error requesting URL: {}", path);
+            println!("err: {}", err);
+        }
+        // Failed, no resp
+        return None;
+    }
+
+    let duration = stopwatch.elapsed().as_secs_f32();
+
+    let contents = curl.get_ref();
+    let body = String::from_utf8_lossy(&contents.0);
+    let headers = parse_headers(&contents.1);
+
+    let resp = HttpResponse {
+        body: body.to_string(),
+        status_code: curl.response_code().unwrap(),
+        duration,
+        headers,
+    };
+
+    Some(resp)
+}
+
 impl HttpReq {
     /// Bakes the request with variables from `ctx`, returning the populated request path.
     pub fn bake(&self, ctx: &Context) -> Option<String> {
@@ -108,79 +182,12 @@ impl HttpReq {
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let stopwatch = Instant::now();
-
-        // TODO: CURL Error Handling
-
-        // Reset CURL context from last request
-        curl.get_mut().reset(); // Reset collector
-        curl.reset(); // Reset handle to initial state, keeping connections open
-        curl.cookie_list("ALL").unwrap(); // Reset stored cookies
-        curl.useragent("Photon/0.1").unwrap(); // TODO: Allow customization
-
-        // Setup CURL context for this request
-        curl.path_as_is(true).unwrap();
-        curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
-        curl.url(path).unwrap();
-
-        if self.body.len() > 0 {
-            curl.post_fields_copy(self.body.as_bytes()).unwrap();
+        let resp = curl_do_request(curl, path, self.body.as_bytes(), &self.headers, self.method);
+        if resp.is_some() {
+            // Successful request
+            *req_counter += 1;
         }
-
-        match self.method {
-            Method::GET => {
-                curl.get(true).unwrap();
-            }
-            Method::POST => {
-                curl.post(true).unwrap();
-            }
-            // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
-            // So we interact with the raw curl handle manually, and set the request type to "custom"
-            Method::DELETE => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
-            },
-            Method::HEAD => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
-            },
-            Method::OPTIONS => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
-            },
-            Method::PATCH => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
-            },
-        }
-
-        let mut headers = List::new();
-        for header in self.headers.iter() {
-            headers.append(header).unwrap();
-        }
-        curl.http_headers(headers).unwrap();
-
-        // Perform CURL request
-        if let Err(err) = curl.perform() {
-            if CONFIG.get().unwrap().verbose {
-                println!("Error requesting URL: {}", path);
-                println!("err: {}", err);
-            }
-            // Failed, no resp
-            return None;
-        }
-        *req_counter += 1;
-
-        let duration = stopwatch.elapsed().as_secs_f32();
-
-        let contents = curl.get_ref();
-        let body = String::from_utf8_lossy(&contents.0);
-        let headers = parse_headers(&contents.1);
-
-        let resp = HttpResponse {
-            body: body.to_string(),
-            status_code: curl.response_code().unwrap(),
-            duration,
-            headers,
-        };
-
-        Some(resp)
+        resp
     }
 
     fn raw_request(
@@ -230,50 +237,9 @@ impl HttpReq {
             return None;
         }
 
-        let stopwatch = Instant::now();
+        let path = format!("{}{}", base_url, req.path.unwrap());
 
-        // TODO: Merge with CURL handling code above, since it's nearly identical
-
-        // Reset CURL context from last request
-        curl.get_mut().reset(); // Reset collector
-        curl.reset(); // Reset handle to initial state, keeping connections open
-        curl.cookie_list("ALL").unwrap(); // Reset stored cookies
-        curl.useragent("Photon/0.1").unwrap(); // TODO: Allow customization
-
-        // Setup CURL context for this request
-        curl.path_as_is(true).unwrap();
-        curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
-        curl.url(&format!("{}{}", base_url, req.path.unwrap()))
-            .unwrap();
-        
-        if body.len() > 0 {
-            curl.post_fields_copy(body.as_bytes()).unwrap();
-        }
-
-        match self.method {
-            Method::GET => {
-                curl.get(true).unwrap();
-            }
-            Method::POST => {
-                curl.post(true).unwrap();
-            }
-            // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
-            // So we interact with the raw curl handle manually, and set the request type to "custom"
-            Method::DELETE => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "DELETE");
-            },
-            Method::HEAD => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "HEAD");
-            },
-            Method::OPTIONS => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
-            },
-            Method::PATCH => unsafe {
-                curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, "PATCH");
-            },
-        }
-
-        let mut headers = List::new();
+        let mut headers = Vec::new();
         for header in req.headers {
             let val_str = str::from_utf8(header.value);
             if val_str.is_err() {
@@ -286,36 +252,15 @@ impl HttpReq {
                 return None;
             }
             headers
-                .append(&format!("{}: {}", header.name, val_str.unwrap()))
-                .unwrap();
+                .push(format!("{}: {}", header.name, val_str.unwrap()));
         }
-        curl.http_headers(headers).unwrap();
 
-        // Perform CURL request
-        if let Err(err) = curl.perform() {
-            if CONFIG.get().unwrap().verbose {
-                println!("Error requesting URL: {}", req.path.unwrap());
-                println!("err: {}", err);
-            }
-            // Failed, no resp
-            return None;
+        let resp = curl_do_request(curl, &path, body.as_bytes(), &self.headers, self.method);
+        if resp.is_some() {
+            // Successful request
+            *req_counter += 1;
         }
-        *req_counter += 1;
-
-        let duration = stopwatch.elapsed().as_secs_f32();
-
-        let contents = curl.get_ref();
-        let body = String::from_utf8_lossy(&contents.0);
-        let headers = parse_headers(&contents.1);
-
-        let resp = HttpResponse {
-            body: body.to_string(),
-            status_code: curl.response_code().unwrap(),
-            duration,
-            headers,
-        };
-
-        Some(resp)
+        resp
     }
 
     pub fn do_request(

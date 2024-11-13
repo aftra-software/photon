@@ -6,7 +6,10 @@ use crate::{
     http::{HttpReq, HttpResponse},
 };
 use curl::easy::{Easy2, Handler, WriteError};
-use photon_dsl::{dsl::{CompiledExpression, Value}, GLOBAL_FUNCTIONS};
+use photon_dsl::{
+    dsl::{CompiledExpression, Value},
+    GLOBAL_FUNCTIONS,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy)]
@@ -107,6 +110,11 @@ impl Context {
         } else {
             self.variables.clone()
         }
+    }
+
+    pub fn insert_str(&mut self, key: &str, value: &str) {
+        self.variables
+            .insert(key.to_string(), Value::String(value.to_string()));
     }
 }
 

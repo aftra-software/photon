@@ -15,7 +15,11 @@ use clap::Parser;
 use curl::easy::Easy2;
 use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
-use photon_dsl::{dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value}, parser::do_parsing, set_config, DslFunc, GLOBAL_FUNCTIONS};
+use photon_dsl::{
+    dsl::{bytecode_to_binary, compile_bytecode, DSLStack, Value},
+    parser::do_parsing,
+    set_config, DslFunc, GLOBAL_FUNCTIONS,
+};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use template::{Collector, Context};
@@ -64,7 +68,10 @@ fn main() {
     // Set same config in DSL lib
     // TODO: make config more similar to CURL, where we do things like
     // photon_dsl::set_debug(true)
-    set_config(photon_dsl::Config { verbose: args.verbose, debug: args.debug });
+    set_config(photon_dsl::Config {
+        verbose: args.verbose,
+        debug: args.debug,
+    });
 
     let now = Instant::now();
 
@@ -161,19 +168,12 @@ fn main() {
         let parsed: Result<Url, _> = base_url.parse();
         if let Ok(url) = parsed {
             if let Some(hostname) = url.host_str() {
-                let mut locked = ctx.lock().unwrap();
-                locked
-                    .variables
-                    .insert("hostname".to_string(), Value::String(hostname.to_string()));
-                locked
-                    .variables
-                    .insert("Hostname".to_string(), Value::String(hostname.to_string()));
+                let mut locked: std::sync::MutexGuard<'_, Context> = ctx.lock().unwrap();
+                locked.insert_str("hostname", hostname);
+                locked.insert_str("Hostname", hostname);
             }
         }
-        ctx.lock()
-            .unwrap()
-            .variables
-            .insert("BaseURL".to_string(), Value::String(base_url.to_string()));
+        ctx.lock().unwrap().insert_str("BaseURL", base_url);
     }
 
     let template_len = templates.loaded_templates.len();

@@ -1,9 +1,7 @@
-use core::panic;
-
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::CONFIG;
+use crate::get_config;
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -373,9 +371,8 @@ impl DSLStack {
         if let Some(val) = self.inner.pop() {
             Ok(val)
         } else {
-            if CONFIG.get().unwrap().debug {
-                println!("Attempted to pop an empty stack");
-            }
+            debug!("Attempted to pop an empty stack");
+
             Err(())
         }
     }
@@ -384,9 +381,8 @@ impl DSLStack {
         match self.pop()? {
             Value::Int(i) => Ok(i),
             other => {
-                if CONFIG.get().unwrap().debug {
-                    println!("Expected int but got {:?}", other);
-                }
+                debug!("Expected int but got {:?}", other);
+
                 Err(())
             }
         }
@@ -396,9 +392,7 @@ impl DSLStack {
         match self.pop()? {
             Value::Short(i) => Ok(i),
             other => {
-                if CONFIG.get().unwrap().debug {
-                    println!("Expected short but got {:?}", other);
-                }
+                debug!("Expected short but got {:?}", other);
                 Err(())
             }
         }
@@ -408,9 +402,7 @@ impl DSLStack {
         match self.pop()? {
             Value::Boolean(b) => Ok(b),
             other => {
-                if CONFIG.get().unwrap().debug {
-                    println!("Expected bool but got {:?}", other);
-                }
+                debug!("Expected bool but got {:?}", other);
                 Err(())
             }
         }
@@ -420,9 +412,7 @@ impl DSLStack {
         match self.pop()? {
             Value::String(s) => Ok(s),
             other => {
-                if CONFIG.get().unwrap().debug {
-                    println!("Expected string but got {:?}", other);
-                }
+                debug!("Expected string but got {:?}", other);
                 Err(())
             }
         }
@@ -550,7 +540,7 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
 
             Ok(())
         }
-        _ => panic!("TODO: implement OP {:?}", op),
+        _ => todo!("TODO: implement OP {:?}", op),
     }
 }
 
@@ -572,29 +562,26 @@ where
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
                     if !functions.contains_key(key) {
-                        if CONFIG.get().unwrap().debug {
-                            println!("Function not found: {:?}", key);
-                        }
+                        debug!("Function not found: {:?}", key);
                         return Err(());
                     }
                     functions.get(key).unwrap()(&mut stack)?;
                 } else {
-                    println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
+                    debug!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());
                 }
             }
+            // TODO: Should variables be case-insensitive?
             Bytecode::Instr(OPCode::LoadVar) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
                     if !variables.contains_key(key) {
-                        if CONFIG.get().unwrap().debug {
-                            println!("Variable not found: {:?}", key);
-                        }
+                        debug!("Variable not found: {:?}", key);
                         return Err(());
                     }
                     stack.push(variables.get(key).unwrap().clone());
                 } else {
-                    println!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
+                    debug!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());
                 }
             }
@@ -603,7 +590,7 @@ where
                 if let Bytecode::Value(Value::Int(val)) = &bytecode[ptr] {
                     stack.push(Value::Int(*val));
                 } else {
-                    println!(
+                    debug!(
                         "LoadConstInt called with invalid argument: {:?}",
                         &bytecode[ptr]
                     );
@@ -615,7 +602,7 @@ where
                 if let Bytecode::Value(Value::Short(val)) = &bytecode[ptr] {
                     stack.push(Value::Short(*val));
                 } else {
-                    println!(
+                    debug!(
                         "LoadConstInt called with invalid argument: {:?}",
                         &bytecode[ptr]
                     );
@@ -629,7 +616,7 @@ where
                     if let Bytecode::Value(Value::Short(val)) = &bytecode[ptr] {
                         ptr = (ptr as isize + *val as isize) as usize;
                     } else {
-                        println!(
+                        debug!(
                             "ShortJump called with invalid argument: {:?}",
                             &bytecode[ptr]
                         );
@@ -642,13 +629,14 @@ where
                 if let Bytecode::Value(Value::String(val)) = &bytecode[ptr] {
                     stack.push(Value::String(val.clone()));
                 } else {
-                    println!(
+                    debug!(
                         "LoadConstStr called with invalid argument: {:?}",
                         &bytecode[ptr]
                     );
                     return Err(());
                 }
             }
+            // Handle rest of the OPCodes
             Bytecode::Instr(op) => {
                 let res = handle_op(*op, &mut stack);
                 if let Err(err) = res {
@@ -659,7 +647,7 @@ where
                 }
             }
             Bytecode::Value(_) => {
-                println!("Unexpected value while executing bytecode");
+                verbose!("Unexpected value while executing bytecode");
                 return Err(());
             }
         }

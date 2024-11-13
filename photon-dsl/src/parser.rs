@@ -9,7 +9,7 @@ use pest_derive::Parser;
 
 use crate::{
     dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value},
-    CONFIG,
+    get_config
 };
 
 #[derive(Parser)]
@@ -22,10 +22,8 @@ pub fn compile_expression(data: &str) -> Result<CompiledExpression, ()> {
 
 pub fn do_parsing(data: &str) -> Result<Expr, ()> {
     let res = DSLParser::parse(Rule::init, data);
-    if CONFIG.get().unwrap().debug {
-        if let Err(err) = &res {
-            println!("parser error: {:?}", err);
-        }
+    if let Err(err) = &res {
+        debug!("parser error: {:?}", err);
     }
     let expr = parse_expr(res.map_err(|_| ())?);
     Ok(optimize_expr(expr))

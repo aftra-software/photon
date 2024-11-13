@@ -9,7 +9,7 @@ use pest_derive::Parser;
 
 use crate::{
     dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value},
-    get_config
+    get_config,
 };
 
 #[derive(Parser)]

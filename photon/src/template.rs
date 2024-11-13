@@ -84,6 +84,7 @@ pub struct HttpRequest {
 }
 
 // TODO: Maybe make this implement HashMap or something to not create a new temporary flattened each usage.
+// e.g. implement Context as a DataStructure so that indexing a key does the flattening dynamically
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
@@ -115,6 +116,10 @@ impl Context {
     pub fn insert_str(&mut self, key: &str, value: &str) {
         self.variables
             .insert(key.to_string(), Value::String(value.to_string()));
+    }
+
+    pub fn insert_int(&mut self, key: &str, value: i64) {
+        self.variables.insert(key.to_string(), Value::Int(value));
     }
 }
 
@@ -157,7 +162,7 @@ impl Matcher {
 
         let data = match self.part {
             ResponsePart::All => {
-                // TODO: Actually return proper All
+                // TODO: Actually return proper All, now easier using CURL
                 let mut parts = vec![];
                 data.headers
                     .iter()
@@ -218,10 +223,11 @@ impl Matcher {
             _ => false,
         }
     }
-    pub fn matches_status(&self, status: u32) -> bool {
+
+    fn matches_status(&self, status: u32) -> bool {
         match &self.r#type {
             MatcherType::Status(statuses) => statuses.iter().any(|s| *s == status),
-            _ => panic!("Cannot match status when type != MatcherType::Status"),
+            _ => unreachable!("Cannot match status when type != MatcherType::Status"),
         }
     }
 }
@@ -246,34 +252,21 @@ impl HttpRequest {
         for (idx, req) in self.path.iter().enumerate() {
             let maybe_resp = req.do_request(base_url, curl, &ctx, req_counter, cache);
             if let Some(resp) = maybe_resp {
-                ctx.variables.insert(
-                    format!("body_{}", idx + 1),
-                    Value::String(resp.body.clone()),
-                );
-                ctx.variables
-                    .insert("body".to_string(), Value::String(resp.body.clone()));
-                ctx.variables.insert(
-                    format!("status_code_{}", idx + 1),
-                    Value::Int(resp.status_code as i64),
-                );
+                ctx.insert_str(&format!("body_{}", idx + 1), &resp.body);
+                ctx.insert_str("body", &resp.body);
+
                 // TODO: Should this be a Float?
-                ctx.variables
-                    .insert("duration".to_string(), Value::Int(resp.duration as i64));
-                ctx.variables.insert(
-                    "status_code".to_string(),
-                    Value::Int(resp.status_code as i64),
-                );
-                ctx.variables.insert(
-                    "header".to_string(),
-                    Value::String(
-                        resp.headers
-                            .iter()
-                            .fold(String::with_capacity(512), |acc, hed| {
-                                acc + &format!("{}: {}", hed.0, hed.1) + "\n"
-                            })
-                            .trim()
-                            .to_string(),
-                    ),
+                ctx.insert_int("duration", resp.duration as i64);
+                ctx.insert_int(&format!("status_code_{}", idx + 1), resp.status_code as i64);
+                ctx.insert_int("status_code", resp.status_code as i64);
+                ctx.insert_str(
+                    "header",
+                    resp.headers
+                        .iter()
+                        .fold(String::with_capacity(512), |acc, hed| {
+                            acc + &format!("{}: {}", hed.0, hed.1) + "\n"
+                        })
+                        .trim(),
                 );
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches

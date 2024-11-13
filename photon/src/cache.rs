@@ -81,9 +81,12 @@ impl RegexCache {
 
     pub fn insert(&mut self, patt: &str) -> Result<u32, regex::Error> {
         if let Entry::Vacant(e) = self.known.entry(patt.to_string()) {
+            // Make sure to compile before modifying Cache state, so we don't pollute with invalid patterns
+            let compiled = Regex::new(patt)?;
+
             let idx = self.patterns.len();
             e.insert(idx as u32);
-            self.patterns.push(Regex::new(patt)?);
+            self.patterns.push(compiled);
             Ok(idx as u32)
         } else {
             Ok(*self.known.get(patt).unwrap())

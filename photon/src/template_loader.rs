@@ -261,19 +261,24 @@ pub fn parse_matcher(
                 .map(|item| item.as_str().unwrap().to_string())
                 .collect();
 
-            let patterns: Vec<Result<u32, _>> = regex_strings
+            let patterns: Result<Vec<u32>, _> = regex_strings
                 .iter()
                 .map(|patt| regex_cache.insert(patt))
                 .collect();
 
-            if patterns.iter().any(|item| item.is_err()) {
-                let err = patterns.iter().find(|item| item.is_err()).cloned().unwrap();
+            if patterns.is_err() {
+                let err = regex_strings
+                    .iter()
+                    .find(|patt| regex_cache.insert(patt).is_err()) // regex_cache.insert idempotent
+                    .cloned()
+                    .unwrap();
                 return Err(TemplateError::InvalidValue(format!(
                     "Could not parse regex, parse output:\n{}",
-                    err.unwrap_err()
+                    err
                 )));
             }
-            *regexes = patterns.iter().flatten().cloned().collect()
+
+            *regexes = patterns.unwrap()
         }
         MatcherType::Status(statuses) => {
             let status_list = yaml["status"].as_vec();

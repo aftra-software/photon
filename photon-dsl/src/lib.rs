@@ -1,3 +1,4 @@
+// TODO: See if there's a nicer way to do this, so that scoping rules still stand
 // Defined before any imports/module declarations because of weird macro scoping
 macro_rules! debug {
     ($fmt:expr $(, $($arg:tt)*)?) => {

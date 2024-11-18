@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "photon-dsl",
-    "photon"
+    "photon",
+    "photon-cli"
 ]
 resolver = "2"
 

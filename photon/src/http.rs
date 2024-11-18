@@ -12,6 +12,7 @@ use regex::Regex;
 
 use crate::{
     cache::{Cache, CacheKey},
+    get_config,
     template::{Collector, Context, Method},
     CONFIG,
 };
@@ -62,10 +63,8 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
         // End condition, when no more patterns match/can be replaced
         if updated == 0 {
             if matches.len() > 0 {
-                if CONFIG.get().unwrap().verbose {
-                    // TODO: Better message?
-                    eprintln!("Skipping request, {} missing parameters", matches.len());
-                }
+                // TODO: Better message?
+                verbose!("Skipping request, {} missing parameters", matches.len());
                 return None; // There's more to match that we couldn't match, invalid request
             }
             break;
@@ -150,10 +149,8 @@ fn curl_do_request(
     let stopwatch = Instant::now();
     // Perform CURL request
     if let Err(err) = curl.perform() {
-        if CONFIG.get().unwrap().verbose {
-            println!("Error requesting URL: {}", path);
-            println!("err: {}", err);
-        }
+        verbose!("Error requesting URL: {}", path);
+        verbose!("err: {}", err);
         // Failed, no resp
         return None;
     }
@@ -222,12 +219,11 @@ impl HttpReq {
         let mut req = httparse::Request::new(&mut headers);
         let parsed = req.parse(raw_data.as_bytes());
         if let Err(err) = parsed {
-            if CONFIG.get().unwrap().verbose {
-                eprintln!(
-                    "Error parsing raw request: {} - request: '{}'",
-                    err, raw_data
-                );
-            }
+            verbose!(
+                "Error parsing raw request: {} - request: '{}'",
+                err,
+                raw_data
+            );
             return None;
         }
 
@@ -239,9 +235,7 @@ impl HttpReq {
         let body = &raw_data[len..];
 
         if let None = req.path {
-            if CONFIG.get().unwrap().verbose {
-                eprintln!("Error: Raw request parsed 'path' missing");
-            }
+            verbose!("Error: Raw request parsed 'path' missing");
             return None;
         }
 
@@ -251,12 +245,10 @@ impl HttpReq {
         for header in req.headers {
             let val_str = str::from_utf8(header.value);
             if val_str.is_err() {
-                if CONFIG.get().unwrap().verbose {
-                    eprintln!(
-                        "Error: header value cannot be converted to string - {:x?}",
-                        header.value
-                    );
-                }
+                verbose!(
+                    "Error: header value cannot be converted to string - {:x?}",
+                    header.value
+                );
                 return None;
             }
             headers.push(format!("{}: {}", header.name, val_str.unwrap()));

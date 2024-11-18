@@ -6,6 +6,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
     cache::{Cache, CacheKey, RegexCache},
+    get_config,
     http::HttpReq,
     template::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
@@ -353,12 +354,12 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 .find(|item| item.is_err())
                 .unwrap()
                 .unwrap_err());
-        } else if CONFIG.get().unwrap().debug {
-            println!("matcher failed, but was optional:");
+        } else {
+            debug!("matcher failed, but was optional:");
             matchers_parsed
                 .iter()
                 .filter(|item| item.is_err())
-                .for_each(|failed| println!("{:?}", failed));
+                .for_each(|failed| debug!("{:?}", failed));
         }
     }
 
@@ -526,6 +527,10 @@ pub struct TemplateLoader {
 }
 
 impl TemplateLoader {
+    pub fn len(&self) -> usize {
+        self.loaded_templates.len()
+    }
+
     pub fn load_from_path(path: &str) -> Self {
         let mut total = 0;
         let mut success = 0;
@@ -543,20 +548,18 @@ impl TemplateLoader {
                 if template.is_ok() {
                     success += 1;
                     loaded_templates.push(template.unwrap());
-                } else if CONFIG.get().unwrap().debug {
-                    println!("{:?} - {}", template, entry.path().to_str().unwrap());
+                } else {
+                    debug!("{:?} - {}", template, entry.path().to_str().unwrap());
                 }
                 total += 1;
             }
         }
-        if CONFIG.get().unwrap().debug {
-            println!(
-                "Successfully loaded template ratio: {}/{} - {:.2}%",
-                success,
-                total,
-                (success as f32 / total as f32) * 100.0
-            );
-        }
+        debug!(
+            "Successfully loaded template ratio: {}/{} - {:.2}%",
+            success,
+            total,
+            (success as f32 / total as f32) * 100.0
+        );
 
         let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
         for template in loaded_templates.iter() {

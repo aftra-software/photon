@@ -1,8 +1,4 @@
-use std::{
-    rc::Rc,
-    sync::{atomic::{AtomicI32, AtomicU32, Ordering}, Mutex, OnceLock},
-    time::Instant,
-};
+use std::{sync::Mutex, time::Instant};
 
 use clap::Parser;
 use photon::{initialize, set_config};
@@ -54,7 +50,7 @@ fn main() {
     }
 
     let mut executor = TemplateExecutor::from(templ_loader);
-    executor.set_template_callback(|_, i, reqs| {
+    executor.set_callbacks(|_, i, reqs| {
         let mut locked_stopwatch = stopwatch.lock().unwrap();
         let mut locked_reqs = last_reqs.lock().unwrap();
         if args.stats && locked_stopwatch.elapsed().as_secs_f32() > 20.0 {
@@ -68,7 +64,7 @@ fn main() {
             *locked_reqs = reqs;
             *locked_stopwatch = Instant::now();
         }
-    });
+    }, |_, _, _| {});
 
     executor.execute(base_url);
 

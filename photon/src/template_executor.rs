@@ -12,9 +12,10 @@ use crate::{
     template_loader::TemplateLoader,
 };
 
-pub struct TemplateExecutor<T>
+pub struct TemplateExecutor<T, K>
 where
     T: Fn(&Template, u32, u32),
+	K: Fn(&Template, String, Option<String>)
 {
     pub templates: Vec<Template>,
     ctx: Rc<Mutex<Context>>,
@@ -22,12 +23,13 @@ where
     cache: Cache,
     regex_cache: RegexCache,
     template_callback: Option<T>,
-    match_callback: Option<T>,
+    match_callback: Option<K>,
 }
 
-impl<T> TemplateExecutor<T>
+impl<T, K> TemplateExecutor<T, K>
 where
     T: Fn(&Template, u32, u32),
+	K: Fn(&Template, String, Option<String>)
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
@@ -44,12 +46,13 @@ where
         }
     }
 
-	pub fn get_total_reqs(&self) -> u32 {
-		self.total_reqs
-	}
+    pub fn get_total_reqs(&self) -> u32 {
+        self.total_reqs
+    }
 
-    pub fn set_template_callback(&mut self, f: T) {
-        self.template_callback = Some(f);
+    pub fn set_callbacks(&mut self, template_callback: T, match_callback: K) {
+        self.template_callback = Some(template_callback);
+        self.match_callback = Some(match_callback);
     }
 
     pub fn execute(&mut self, base_url: &str) {

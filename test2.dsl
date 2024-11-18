@@ -1,1 +1,0 @@
-contains(body, 'errmsg0\": \"OK')

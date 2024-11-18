@@ -50,21 +50,39 @@ fn main() {
     }
 
     let mut executor = TemplateExecutor::from(templ_loader);
-    executor.set_callbacks(|_, i, reqs| {
-        let mut locked_stopwatch = stopwatch.lock().unwrap();
-        let mut locked_reqs = last_reqs.lock().unwrap();
-        if args.stats && locked_stopwatch.elapsed().as_secs_f32() > 20.0 {
-            println!(
-                "RPS: {}, Template: {}/{}, Requests: {}",
-                (reqs - *locked_reqs) as f32 / locked_stopwatch.elapsed().as_secs_f32(),
-                i,
-                template_len,
-                reqs
-            );
-            *locked_reqs = reqs;
-            *locked_stopwatch = Instant::now();
-        }
-    }, |_, _, _| {});
+    executor.set_callbacks(
+        |_, i, reqs| {
+            let mut locked_stopwatch = stopwatch.lock().unwrap();
+            let mut locked_reqs = last_reqs.lock().unwrap();
+            if args.stats && locked_stopwatch.elapsed().as_secs_f32() > 20.0 {
+                println!(
+                    "RPS: {}, Template: {}/{}, Requests: {}",
+                    (reqs - *locked_reqs) as f32 / locked_stopwatch.elapsed().as_secs_f32(),
+                    i,
+                    template_len,
+                    reqs
+                );
+                *locked_reqs = reqs;
+                *locked_stopwatch = Instant::now();
+            }
+        },
+        |template, name| {
+            if name.is_some() {
+                println!(
+                    "Matched: [{}] {}:{}",
+                    template.info.severity.colored_string(),
+                    template.id,
+                    name.unwrap()
+                );
+            } else {
+                println!(
+                    "Matched: [{}] {}",
+                    template.info.severity.colored_string(),
+                    template.id
+                );
+            }
+        },
+    );
 
     executor.execute(base_url);
 

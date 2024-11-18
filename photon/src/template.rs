@@ -326,7 +326,7 @@ impl Collector {
 }
 
 impl Template {
-    pub fn execute(
+    pub fn execute<K>(
         &self,
         base_url: &str,
         curl: &mut Easy2<Collector>,
@@ -334,7 +334,10 @@ impl Template {
         req_counter: &mut u32,
         cache: &mut Cache,
         regex_cache: &RegexCache,
-    ) {
+        callback: &Option<K>,
+    ) where
+        K: Fn(&Template, Option<String>),
+    {
         let ctx = Rc::from(Mutex::from(Context {
             variables: FxHashMap::default(),
             parent: Some(parent_ctx),
@@ -355,18 +358,13 @@ impl Template {
                 }
                 for name in unique_names {
                     if name.is_empty() {
-                        println!(
-                            "Matched: [{}] {}",
-                            self.info.severity.colored_string(),
-                            self.id
-                        );
+                        if callback.is_some() {
+                            callback.as_ref().unwrap()(&self, None);
+                        }
                     } else {
-                        println!(
-                            "Matched: [{}] {}:{}",
-                            self.info.severity.colored_string(),
-                            self.id,
-                            name
-                        );
+                        if callback.is_some() {
+                            callback.as_ref().unwrap()(&self, Some(name));
+                        }
                     }
                 }
             }

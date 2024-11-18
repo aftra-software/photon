@@ -15,7 +15,7 @@ use crate::{
 pub struct TemplateExecutor<T, K>
 where
     T: Fn(&Template, u32, u32),
-	K: Fn(&Template, String, Option<String>)
+    K: Fn(&Template, Option<String>),
 {
     pub templates: Vec<Template>,
     ctx: Rc<Mutex<Context>>,
@@ -29,7 +29,7 @@ where
 impl<T, K> TemplateExecutor<T, K>
 where
     T: Fn(&Template, u32, u32),
-	K: Fn(&Template, String, Option<String>)
+    K: Fn(&Template, Option<String>),
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
@@ -77,6 +77,7 @@ where
                 &mut self.total_reqs,
                 &mut self.cache,
                 &self.regex_cache,
+                &self.match_callback,
             );
             if self.template_callback.is_some() {
                 self.template_callback.as_ref().unwrap()(template, i as u32, self.total_reqs);

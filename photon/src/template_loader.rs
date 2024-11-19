@@ -464,19 +464,20 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     })
 }
 
-fn load_variables(yaml: &Yaml) -> Vec<(String, Value)> {
+fn parse_variables(yaml: &Yaml) -> Vec<(String, Value)> {
     let mut variables = Vec::new();
 
     let hash = yaml.as_hash().unwrap();
     
+    let regex_pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
     for (k, v) in hash {
         if k.is_array() || v.is_array() {
             continue
         }
         let key = k.as_str().unwrap();
         let value = v.as_str().unwrap();
-        if BRACKET_PATTERN.get().unwrap().lock().unwrap().is_match(value) {
-
+        if regex_pattern.is_match(value) {
+            // TODO: Store compiled expression for running right before template is executed
         } else {
             variables.push((key.to_string(), Value::String(value.to_string())));
         }
@@ -534,7 +535,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
     let http = http_parsed.into_iter().flatten().collect();
 
     let variables = if template_yaml["variables"].is_hash() {
-        load_variables(&template_yaml["variables"])
+        parse_variables(&template_yaml["variables"])
     } else {
         vec![]
     };

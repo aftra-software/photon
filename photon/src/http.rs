@@ -36,8 +36,8 @@ pub struct HttpReq {
     pub raw: String,
 }
 
-fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
-    let mut baked = inp.clone();
+fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
+    let mut baked = inp.to_string();
     let flattened = ctx.flatten_variables();
     loop {
         let tmp = baked.clone();
@@ -81,7 +81,7 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
     Some(baked)
 }
 
-fn parse_headers(contents: &Vec<u8>) -> Option<Vec<(String, String)>> {
+fn parse_headers(contents: &[u8]) -> Option<Vec<(String, String)>> {
     String::from_utf8_lossy(contents)
         .split('\n')
         .filter(|chunk| !chunk.is_empty())

@@ -325,8 +325,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         Method::GET
     };
 
-    let body = if http_body.is_some() {
-        http_body.unwrap().to_string()
+    let body = if let Some(body) = http_body {
+        body.to_string()
     } else {
         String::from("")
     };
@@ -528,6 +528,10 @@ pub struct TemplateLoader {
 impl TemplateLoader {
     pub fn len(&self) -> usize {
         self.loaded_templates.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn load_from_path(path: &str) -> Self {

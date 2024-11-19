@@ -1,6 +1,8 @@
 use core::str;
 use std::{
-    collections::HashSet, sync::{Mutex, OnceLock}, time::{Duration, Instant}
+    collections::HashSet,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use curl::easy::{Easy2, List};
@@ -61,8 +63,15 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
         // End condition, when no more patterns match/can be replaced
         if updated == 0 {
             if matches.len() > 0 {
-                let unique = matches.iter().map(|m| m.as_str().to_string()).collect::<HashSet<String>>();
-                verbose!("Skipping request, {} missing parameters: [{}]", unique.len(), unique.into_iter().collect::<Vec<String>>().join(", "));
+                let unique = matches
+                    .iter()
+                    .map(|m| m.as_str().to_string())
+                    .collect::<HashSet<String>>();
+                verbose!(
+                    "Skipping request, {} missing parameters: [{}]",
+                    unique.len(),
+                    unique.into_iter().collect::<Vec<String>>().join(", ")
+                );
                 return None; // There's more to match that we couldn't match, invalid request
             }
             break;
@@ -238,14 +247,14 @@ impl HttpReq {
             return None;
         }
 
-        let raw_path = if !req.path.unwrap().starts_with("http") { 
+        let raw_path = if !req.path.unwrap().starts_with("http") {
             format!("{}{}", base_url, req.path.unwrap())
         } else {
             // Handle absolute-form requests https://httpwg.org/specs/rfc9112.html#absolute-form
             format!("{}", req.path.unwrap())
         };
 
-        // Some templates accidentally add an extra space to the url somehow 
+        // Some templates accidentally add an extra space to the url somehow
         let path = raw_path.trim().to_string();
 
         let mut headers = Vec::new();
@@ -286,7 +295,7 @@ impl HttpReq {
             return None;
         }
 
-        // Some templates accidentally add an extra space to the url somehow 
+        // Some templates accidentally add an extra space to the url somehow
         let path = path.trim().to_string();
 
         // Skip caching below if we know the request is only happening once

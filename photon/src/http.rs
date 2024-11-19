@@ -148,7 +148,7 @@ fn curl_do_request(
     let stopwatch = Instant::now();
     // Perform CURL request
     if let Err(err) = curl.perform() {
-        verbose!("Error requesting URL: {}", path);
+        verbose!("Error requesting URL: '{}'", path);
         verbose!("err: {}", err);
         // Failed, no resp
         return None;
@@ -238,7 +238,15 @@ impl HttpReq {
             return None;
         }
 
-        let path = format!("{}{}", base_url, req.path.unwrap());
+        let raw_path = if !req.path.unwrap().starts_with("http") { 
+            format!("{}{}", base_url, req.path.unwrap())
+        } else {
+            // Handle absolute-form requests https://httpwg.org/specs/rfc9112.html#absolute-form
+            format!("{}", req.path.unwrap())
+        };
+
+        // Some templates accidentally add an extra space to the url somehow 
+        let path = raw_path.trim().to_string();
 
         let mut headers = Vec::new();
         for header in req.headers {
@@ -277,6 +285,9 @@ impl HttpReq {
         if path.is_empty() || !path.contains(base_url) {
             return None;
         }
+
+        // Some templates accidentally add an extra space to the url somehow 
+        let path = path.trim().to_string();
 
         // Skip caching below if we know the request is only happening once
         let key = CacheKey(self.method, self.headers.clone(), self.path.clone());

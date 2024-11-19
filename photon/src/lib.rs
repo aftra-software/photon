@@ -20,7 +20,7 @@ pub mod template;
 pub mod template_executor;
 pub mod template_loader;
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, LazyLock};
 
 use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
@@ -37,11 +37,23 @@ pub struct Config {
     pub debug: bool,
 }
 
-static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
+static CONFIG: LazyLock<Mutex<Config>> = LazyLock::new(|| Mutex::from(Config {
+    debug: false,
+    verbose: false
+}));
 
 pub(crate) fn get_config() -> Config {
-    CONFIG.get().unwrap().lock().unwrap().clone()
+    CONFIG.lock().unwrap().clone()
 }
+
+pub fn set_debug(state: bool) {
+    CONFIG.lock().unwrap().debug = state;
+}
+
+pub fn set_verbose(state: bool) {
+    CONFIG.lock().unwrap().verbose = state;
+}
+
 pub fn set_config(config: Config) {
     // Set same config in DSL lib
     // TODO: make config more similar to CURL, where we do things like
@@ -51,7 +63,7 @@ pub fn set_config(config: Config) {
         debug: config.debug,
     });
 
-    let _ = CONFIG.set(Mutex::from(config));
+    *CONFIG.lock().unwrap() = config;
 }
 
 pub fn initialize() {

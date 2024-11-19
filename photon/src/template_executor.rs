@@ -5,6 +5,7 @@ use std::{rc::Rc, sync::Mutex};
 use curl::easy::Easy2;
 use rustc_hash::FxHashMap;
 use url::Url;
+use rand::distributions::{Alphanumeric, DistString};
 
 use crate::{
     cache::{Cache, RegexCache},
@@ -70,6 +71,9 @@ where
             // So for sanity sake we define Root and Base url as the same.
             self.ctx.lock().unwrap().insert_str("BaseURL", base_url);
             self.ctx.lock().unwrap().insert_str("RootURL", base_url);
+
+            let randstr = Alphanumeric.sample_string(&mut rand::thread_rng(), 27);
+            self.ctx.lock().unwrap().insert_str("randstr", &randstr);
         }
 
         for (i, template) in self.templates.iter().enumerate() {

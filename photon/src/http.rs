@@ -62,7 +62,7 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
         }
         // End condition, when no more patterns match/can be replaced
         if updated == 0 {
-            if matches.len() > 0 {
+            if !matches.is_empty() {
                 let unique = matches
                     .iter()
                     .map(|m| m.as_str().to_string())
@@ -82,9 +82,9 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
 }
 
 fn parse_headers(contents: &Vec<u8>) -> Option<Vec<(String, String)>> {
-    String::from_utf8_lossy(&contents)
+    String::from_utf8_lossy(contents)
         .split('\n')
-        .filter(|chunk| chunk.len() > 0)
+        .filter(|chunk| !chunk.is_empty())
         .map(|a| {
             if let Some((key, value)) = a.split_once(':') {
                 Some((key.to_string(), value.trim().to_string()))
@@ -121,7 +121,7 @@ fn curl_do_request(
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
     curl.url(path).unwrap();
 
-    if body.len() > 0 {
+    if !body.is_empty() {
         curl.post_fields_copy(body).unwrap();
     }
 
@@ -242,7 +242,7 @@ impl HttpReq {
 
         let body = &raw_data[len..];
 
-        if let None = req.path {
+        if req.path.is_none() {
             verbose!("Error: Raw request parsed 'path' missing");
             return None;
         }
@@ -251,7 +251,7 @@ impl HttpReq {
             format!("{}{}", base_url, req.path.unwrap())
         } else {
             // Handle absolute-form requests https://httpwg.org/specs/rfc9112.html#absolute-form
-            format!("{}", req.path.unwrap())
+            req.path.unwrap().to_string()
         };
 
         // Some templates accidentally add an extra space to the url somehow

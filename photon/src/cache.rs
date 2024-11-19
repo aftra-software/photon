@@ -71,6 +71,12 @@ pub struct RegexCache {
     known: FxHashMap<String, u32>,
 }
 
+impl Default for RegexCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegexCache {
     pub fn new() -> Self {
         Self {

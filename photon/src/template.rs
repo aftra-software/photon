@@ -359,12 +359,10 @@ impl Template {
                 for name in unique_names {
                     if name.is_empty() {
                         if callback.is_some() {
-                            callback.as_ref().unwrap()(&self, None);
+                            callback.as_ref().unwrap()(self, None);
                         }
-                    } else {
-                        if callback.is_some() {
-                            callback.as_ref().unwrap()(&self, Some(name));
-                        }
+                    } else if callback.is_some() {
+                        callback.as_ref().unwrap()(self, Some(name));
                     }
                 }
             }

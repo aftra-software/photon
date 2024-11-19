@@ -61,7 +61,8 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
         // End condition, when no more patterns match/can be replaced
         if updated == 0 {
             if matches.len() > 0 {
-                verbose!("Skipping request, {} missing parameters: [{}]", matches.len(), matches.iter().map(|m| m.as_str().to_string()).collect::<HashSet<String>>().into_iter().collect::<Vec<String>>().join(", "));
+                let unique = matches.iter().map(|m| m.as_str().to_string()).collect::<HashSet<String>>();
+                verbose!("Skipping request, {} missing parameters: [{}]", unique.len(), unique.into_iter().collect::<Vec<String>>().join(", "));
                 return None; // There's more to match that we couldn't match, invalid request
             }
             break;

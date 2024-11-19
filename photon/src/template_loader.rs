@@ -12,7 +12,6 @@ use crate::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
         Template,
     },
-    CONFIG,
 };
 
 #[derive(Debug)]

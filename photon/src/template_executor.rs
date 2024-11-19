@@ -66,7 +66,10 @@ where
                     locked.insert_str("Hostname", hostname);
                 }
             }
+            // Base URL is the URL passed in, except documented as full url? but full url != base url
+            // So for sanity sake we define Root and Base url as the same.
             self.ctx.lock().unwrap().insert_str("BaseURL", base_url);
+            self.ctx.lock().unwrap().insert_str("RootURL", base_url);
         }
 
         for (i, template) in self.templates.iter().enumerate() {

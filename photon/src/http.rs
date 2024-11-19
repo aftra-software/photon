@@ -1,7 +1,6 @@
 use core::str;
 use std::{
-    sync::{Mutex, OnceLock},
-    time::{Duration, Instant},
+    collections::HashSet, sync::{Mutex, OnceLock}, time::{Duration, Instant}
 };
 
 use curl::easy::{Easy2, List};
@@ -14,7 +13,6 @@ use crate::{
     cache::{Cache, CacheKey},
     get_config,
     template::{Collector, Context, Method},
-    CONFIG,
 };
 
 pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
@@ -63,8 +61,7 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
         // End condition, when no more patterns match/can be replaced
         if updated == 0 {
             if matches.len() > 0 {
-                // TODO: Better message?
-                verbose!("Skipping request, {} missing parameters", matches.len());
+                verbose!("Skipping request, {} missing parameters: [{}]", matches.len(), matches.iter().map(|m| m.as_str().to_string()).collect::<HashSet<String>>().into_iter().collect::<Vec<String>>().join(", "));
                 return None; // There's more to match that we couldn't match, invalid request
             }
             break;
@@ -74,19 +71,20 @@ fn bake_ctx(inp: &String, ctx: &Context) -> Option<String> {
     Some(baked)
 }
 
-fn parse_headers(contents: &Vec<u8>) -> Vec<(String, String)> {
+fn parse_headers(contents: &Vec<u8>) -> Option<Vec<(String, String)>> {
     String::from_utf8_lossy(&contents)
         .split('\n')
         .filter(|chunk| chunk.len() > 0)
         .map(|a| {
             if let Some((key, value)) = a.split_once(':') {
-                (key.to_string(), value.trim().to_string())
+                Some((key.to_string(), value.trim().to_string()))
             } else {
-                // If this happens we're doing something wrong, just panic at that point
-                println!("Offending header: {a}");
-                panic!(
+                // If this happens we're doing something very wrong
+                verbose!(
                     "Error splitting header, shouldn't happen ever! If you see this report as bug!"
                 );
+                verbose!("Offending header: {a}");
+                None
             }
         })
         .collect()
@@ -159,7 +157,7 @@ fn curl_do_request(
 
     let contents = curl.get_ref();
     let body = String::from_utf8_lossy(&contents.0);
-    let headers = parse_headers(&contents.1);
+    let headers = parse_headers(&contents.1)?;
 
     let resp = HttpResponse {
         body: body.to_string(),

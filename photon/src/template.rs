@@ -128,6 +128,7 @@ pub struct Template {
     pub id: String,
     pub info: Info,
     pub http: Vec<HttpRequest>,
+    pub variables: Vec<(String, Value)>
 }
 
 #[derive(Debug)]
@@ -339,7 +340,7 @@ impl Template {
         K: Fn(&Template, Option<String>),
     {
         let ctx = Rc::from(Mutex::from(Context {
-            variables: FxHashMap::default(),
+            variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));
         for http in self.http.iter() {

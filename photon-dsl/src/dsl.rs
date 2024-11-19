@@ -56,6 +56,7 @@ pub enum Value {
     Int(i64),
     Short(i16),
     Boolean(bool),
+    // TODO: Add Array support
 }
 
 #[derive(Debug)]

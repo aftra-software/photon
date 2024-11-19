@@ -1,13 +1,13 @@
 use std::{collections::HashMap, fmt::Debug, fs};
 
-use photon_dsl::{dsl::CompiledExpression, parser::compile_expression};
+use photon_dsl::{dsl::{CompiledExpression, Value}, parser::compile_expression};
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
     cache::{Cache, CacheKey, RegexCache},
     get_config,
-    http::HttpReq,
+    http::{HttpReq, BRACKET_PATTERN},
     template::{
         Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
         Template,
@@ -464,6 +464,27 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     })
 }
 
+fn load_variables(yaml: &Yaml) -> Vec<(String, Value)> {
+    let mut variables = Vec::new();
+
+    let hash = yaml.as_hash().unwrap();
+    
+    for (k, v) in hash {
+        if k.is_array() || v.is_array() {
+            continue
+        }
+        let key = k.as_str().unwrap();
+        let value = v.as_str().unwrap();
+        if BRACKET_PATTERN.get().unwrap().lock().unwrap().is_match(value) {
+
+        } else {
+            variables.push((key.to_string(), Value::String(value.to_string())));
+        }
+    }
+
+    variables
+}
+
 pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Template, TemplateError> {
     let template_yaml = &load_yaml_from_file(file)?[0];
 
@@ -512,10 +533,17 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
 
     let http = http_parsed.into_iter().flatten().collect();
 
+    let variables = if template_yaml["variables"].is_hash() {
+        load_variables(&template_yaml["variables"])
+    } else {
+        vec![]
+    };
+
     Ok(Template {
         id: id.unwrap().into(),
         http,
         info,
+        variables
     })
 }
 

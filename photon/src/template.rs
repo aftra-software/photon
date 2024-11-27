@@ -3,6 +3,7 @@ use std::{rc::Rc, sync::Mutex};
 
 use crate::{
     cache::{Cache, RegexCache},
+    get_config,
     http::{HttpReq, HttpResponse},
 };
 use curl::easy::{Easy2, Handler, WriteError};
@@ -71,13 +72,24 @@ pub struct Matcher {
     pub r#type: MatcherType,
     pub name: Option<String>,
     pub negative: bool,
-    pub internal: bool, // Used for workflows, matches, but does not print
+    pub group: Option<i64>, // Regex group number, None represents entire regex match
+    pub internal: bool,     // Used for workflows, matches, but does not print
     pub part: ResponsePart,
     pub condition: Condition,
 }
 
 #[derive(Debug)]
+pub struct Extractor {
+    pub r#type: MatcherType,
+    pub name: Option<String>,
+    pub group: Option<i64>, // Regex group number, None represents entire regex match
+    pub internal: bool,     // Used for workflows, matches, but does not print
+    pub part: ResponsePart,
+}
+
+#[derive(Debug)]
 pub struct HttpRequest {
+    pub extractors: Vec<Extractor>,
     pub matchers: Vec<Matcher>,
     pub matchers_condition: Condition,
     pub path: Vec<HttpReq>,
@@ -121,6 +133,10 @@ impl Context {
     pub fn insert_int(&mut self, key: &str, value: i64) {
         self.variables.insert(key.to_string(), Value::Int(value));
     }
+
+    pub fn insert(&mut self, key: &str, value: Value) {
+        self.variables.insert(key.to_string(), value);
+    }
 }
 
 #[derive(Debug)]
@@ -128,7 +144,7 @@ pub struct Template {
     pub id: String,
     pub info: Info,
     pub http: Vec<HttpRequest>,
-    pub variables: Vec<(String, Value)>
+    pub variables: Vec<(String, Value)>,
 }
 
 #[derive(Debug)]
@@ -150,6 +166,36 @@ impl Severity {
     }
 }
 
+fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
+    match part {
+        ResponsePart::All => {
+            // TODO: Actually return proper All, now easier using CURL
+            let mut parts = vec![];
+            data.headers
+                .iter()
+                .for_each(|(k, v)| parts.push(format!("{}: {}\n", k, v)));
+            parts.push(data.body.clone());
+            parts.concat()
+        }
+        ResponsePart::Body => data.body.clone(),
+        ResponsePart::Header => data
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{}: {}\n", k, v))
+            .collect::<Vec<String>>()
+            .concat(),
+        ResponsePart::Raw => {
+            // TODO: Actually return Raw
+            let mut parts = vec![];
+            data.headers
+                .iter()
+                .for_each(|(k, v)| parts.push(format!("{}: {}\n", k, v)));
+            parts.push(data.body.clone());
+            parts.concat()
+        }
+    }
+}
+
 impl Matcher {
     pub fn matches(
         &self,
@@ -161,33 +207,7 @@ impl Matcher {
             return self.matches_status(data.status_code);
         }
 
-        let data = match self.part {
-            ResponsePart::All => {
-                // TODO: Actually return proper All, now easier using CURL
-                let mut parts = vec![];
-                data.headers
-                    .iter()
-                    .for_each(|(k, v)| parts.push(format!("{}: {}\n", k, v)));
-                parts.push(data.body.clone());
-                parts.concat()
-            }
-            ResponsePart::Body => data.body.clone(),
-            ResponsePart::Header => data
-                .headers
-                .iter()
-                .map(|(k, v)| format!("{}: {}\n", k, v))
-                .collect::<Vec<String>>()
-                .concat(),
-            ResponsePart::Raw => {
-                // TODO: Actually return Raw
-                let mut parts = vec![];
-                data.headers
-                    .iter()
-                    .for_each(|(k, v)| parts.push(format!("{}: {}\n", k, v)));
-                parts.push(data.body.clone());
-                parts.concat()
-            }
-        };
+        let data = response_to_string(data, self.part);
         match &self.r#type {
             MatcherType::DSL(dsls) => {
                 let vars = context.flatten_variables();
@@ -233,6 +253,49 @@ impl Matcher {
     }
 }
 
+impl Extractor {
+    pub fn extract(
+        &self,
+        data: &HttpResponse,
+        regex_cache: &RegexCache,
+        context: &Context,
+    ) -> Option<Value> {
+        if let MatcherType::Status(_) = self.r#type {
+            return self.matches_status(data.status_code);
+        }
+
+        let data = response_to_string(data, self.part);
+        match &self.r#type {
+            MatcherType::DSL(dsls) => {
+                let vars = context.flatten_variables();
+                dsls.iter()
+                    .flat_map(|expr| expr.execute(&vars, GLOBAL_FUNCTIONS.get().unwrap()).ok())
+                    .next()
+            }
+            MatcherType::Regex(regexes) => regexes
+                .iter()
+                .flat_map(|pattern| {
+                    regex_cache.match_group(*pattern, &data, self.group.unwrap_or(0) as usize)
+                })
+                .next()
+                .map(Value::String),
+            MatcherType::Word(_) => {
+                debug!("Extractor does not support Word matching");
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn matches_status(&self, status: u32) -> Option<Value> {
+        match &self.r#type {
+            // TODO: Maybe this should be different/Not implemented for Extractor
+            MatcherType::Status(_) => Some(Value::Int(status as i64)),
+            _ => unreachable!("Cannot match status when type != MatcherType::Status"),
+        }
+    }
+}
+
 impl HttpRequest {
     pub fn execute(
         &self,
@@ -269,6 +332,16 @@ impl HttpRequest {
                         })
                         .trim(),
                 );
+                for extractor in self.extractors.iter() {
+                    if extractor.name.is_some() {
+                        if let Some(res) = extractor.extract(&resp, regex_cache, &ctx) {
+                            // A bit clunky to safely mutate the shared parent of the current ctx
+                            let tmp = ctx.parent.as_ref().unwrap().clone();
+                            let mut locked_parent = tmp.lock().unwrap();
+                            locked_parent.insert(extractor.name.as_ref().unwrap(), res);
+                        }
+                    }
+                }
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
                     if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx) {

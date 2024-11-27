@@ -20,7 +20,7 @@ pub mod template;
 pub mod template_executor;
 pub mod template_loader;
 
-use std::sync::{Mutex, LazyLock};
+use std::sync::{LazyLock, Mutex};
 
 use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
@@ -37,10 +37,12 @@ pub struct Config {
     pub debug: bool,
 }
 
-static CONFIG: LazyLock<Mutex<Config>> = LazyLock::new(|| Mutex::from(Config {
-    debug: false,
-    verbose: false
-}));
+static CONFIG: LazyLock<Mutex<Config>> = LazyLock::new(|| {
+    Mutex::from(Config {
+        debug: false,
+        verbose: false,
+    })
+});
 
 pub(crate) fn get_config() -> Config {
     CONFIG.lock().unwrap().clone()

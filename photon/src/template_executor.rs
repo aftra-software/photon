@@ -3,9 +3,9 @@
 use std::{rc::Rc, sync::Mutex};
 
 use curl::easy::Easy2;
+use rand::distributions::{Alphanumeric, DistString};
 use rustc_hash::FxHashMap;
 use url::Url;
-use rand::distributions::{Alphanumeric, DistString};
 
 use crate::{
     cache::{Cache, RegexCache},
@@ -74,9 +74,18 @@ where
 
             // Some random strings
             // TODO: Do we want to support arbitrary many random strings?
-            self.ctx.lock().unwrap().insert_str("randstr", &Alphanumeric.sample_string(&mut rand::thread_rng(), 27));
-            self.ctx.lock().unwrap().insert_str("randstr_1", &Alphanumeric.sample_string(&mut rand::thread_rng(), 27));
-            self.ctx.lock().unwrap().insert_str("randstr_2", &Alphanumeric.sample_string(&mut rand::thread_rng(), 27));
+            self.ctx.lock().unwrap().insert_str(
+                "randstr",
+                &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
+            );
+            self.ctx.lock().unwrap().insert_str(
+                "randstr_1",
+                &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
+            );
+            self.ctx.lock().unwrap().insert_str(
+                "randstr_2",
+                &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
+            );
         }
 
         for (i, template) in self.templates.iter().enumerate() {

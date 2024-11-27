@@ -104,6 +104,17 @@ impl RegexCache {
         self.patterns[idx as usize].is_match(data)
     }
 
+    // Panics if the given idx is not valid, returns n-th group match for given pattern
+    pub fn match_group(&self, idx: u32, data: &str, group: usize) -> Option<String> {
+        Some(
+            self.patterns[idx as usize]
+                .captures(data)?
+                .get(group)?
+                .as_str()
+                .to_string(),
+        )
+    }
+
     pub fn finalize(&mut self) {
         // Just about clear the hashmap, without removing it, because its easier to implement
         self.known.clear();

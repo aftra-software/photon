@@ -1,6 +1,9 @@
 use std::{collections::HashMap, fmt::Debug, fs};
 
-use photon_dsl::{dsl::{CompiledExpression, Value}, parser::compile_expression};
+use photon_dsl::{
+    dsl::{CompiledExpression, Value},
+    parser::compile_expression,
+};
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -9,8 +12,8 @@ use crate::{
     get_config,
     http::{HttpReq, BRACKET_PATTERN},
     template::{
-        Condition, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity,
-        Template,
+        Condition, Extractor, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart,
+        Severity, Template,
     },
 };
 
@@ -202,6 +205,7 @@ pub fn parse_matcher(
 
     let negative = yaml["negative"].as_bool().unwrap_or(false);
     let internal = yaml["internal"].as_bool().unwrap_or(false);
+    let group = yaml["group"].as_i64();
 
     let r#type = map_matcher_type(matcher_type.unwrap());
     if r#type.is_none() {
@@ -300,6 +304,7 @@ pub fn parse_matcher(
         part,
         condition,
         r#type: matcher_type,
+        group,
         negative,
         internal,
         name,
@@ -310,6 +315,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     let http_method = yaml["method"].as_str();
     let http_body = yaml["body"].as_str();
     let http_matchers = yaml["matchers"].as_vec();
+    let http_extractors = yaml["extractors"].as_vec();
 
     if http_matchers.is_none() {
         return Err(TemplateError::MissingField("matchers".into()));
@@ -363,6 +369,40 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     }
 
     let matchers = matchers_parsed.into_iter().flatten().flatten().collect();
+
+    let extractors = if http_extractors.is_some() {
+        let extractors_parsed: Vec<_> = http_extractors
+            .unwrap()
+            .iter()
+            .map(|item| parse_matcher(item, matchers_condition, regex_cache))
+            .collect();
+        if extractors_parsed.iter().any(|item| item.is_err()) {
+            return Err(extractors_parsed
+                .into_iter()
+                .find(|item| item.is_err())
+                .unwrap()
+                .unwrap_err());
+        }
+        extractors_parsed
+            .into_iter()
+            .flatten()
+            .flat_map(|item| {
+                if let Some(matcher) = item {
+                    Some(Extractor {
+                        r#type: matcher.r#type,
+                        group: matcher.group,
+                        internal: matcher.internal,
+                        name: matcher.name,
+                        part: matcher.part,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
 
     // TODO: make generic array/(string edge case) iterator thingy for these
     let mut requests = if yaml["path"].is_array() {
@@ -460,6 +500,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     Ok(HttpRequest {
         matchers_condition,
         matchers,
+        extractors,
         path: requests,
     })
 }
@@ -468,11 +509,11 @@ fn parse_variables(yaml: &Yaml) -> Vec<(String, Value)> {
     let mut variables = Vec::new();
 
     let hash = yaml.as_hash().unwrap();
-    
+
     let regex_pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
     for (k, v) in hash {
         if k.is_array() || v.is_array() {
-            continue
+            continue;
         }
         let key = k.as_str().unwrap();
         let value = v.as_str().unwrap();
@@ -544,7 +585,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
         id: id.unwrap().into(),
         http,
         info,
-        variables
+        variables,
     })
 }
 

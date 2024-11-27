@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bincode::{Decode, Encode};
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
 use httparse::Status;
@@ -19,7 +20,7 @@ use crate::{
 
 pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct HttpResponse {
     pub body: String,
     pub headers: Vec<(String, String)>,

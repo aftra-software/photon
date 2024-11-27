@@ -1,5 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 
+use bincode::config;
+use lz4::block::{self, CompressionMode};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -10,7 +12,7 @@ use crate::{http::HttpResponse, template::Method};
 pub struct CacheKey(pub Method, pub Vec<String>, pub String);
 
 pub struct Cache {
-    inner: HashMap<CacheKey, Option<HttpResponse>>,
+    inner: HashMap<CacheKey, Option<Vec<u8>>>,
     current_tokens: HashMap<CacheKey, u16>,
     tokens: HashMap<CacheKey, u16>,
 }
@@ -50,7 +52,14 @@ impl Cache {
     pub fn get(&mut self, key: &CacheKey) -> Option<HttpResponse> {
         let ret = self.inner.get(key).unwrap().clone();
         self.decrease_token(key);
-        ret
+        if let Some(data) = ret {
+            // Unwraps below should be 100% safe, since both bincode and compressed data are created by `store` function below.
+            let decompressed = block::decompress(&data, None).unwrap();
+            let (resp, _) = bincode::decode_from_slice(&decompressed, config::standard()).unwrap();
+            Some(resp)
+        } else {
+            None
+        }
     }
 
     pub fn contains(&self, key: &CacheKey) -> bool {
@@ -58,7 +67,16 @@ impl Cache {
     }
 
     pub fn store(&mut self, key: &CacheKey, value: Option<HttpResponse>) {
-        self.inner.insert(key.clone(), value);
+        if let Some(data) = value {
+            let encoded = bincode::encode_to_vec(data.clone(), config::standard()).unwrap();
+            // Compression level 10 is used since `store` isn't called all that often, so spending a bit of time to save memory is worth it.
+            let compressed =
+                block::compress(&encoded, Some(CompressionMode::HIGHCOMPRESSION(10)), true)
+                    .unwrap();
+            self.inner.insert(key.clone(), Some(compressed));
+        } else {
+            self.inner.insert(key.clone(), None);
+        }
     }
 
     pub fn can_cache(&self, key: &CacheKey) -> bool {

@@ -13,6 +13,6 @@ opt-level = 1
 lto = "thin"
 strip = true
 panic = "abort"
-# optimize for size, brings resulting binary size from 3MB -> 2.6MB, *slightly* slower binary, but worth it IMO
+# optimize for size, brings resulting binary size from e.g. 3MB -> 2.6MB, *slightly* slower binary, but worth it IMO
 opt-level = "s"
 codegen-units = 1

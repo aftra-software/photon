@@ -8,9 +8,10 @@ Photon is a (Work In Progress) blazing-fast and highly efficient security scanni
 - **Nuclei Template Compatibility**: Mostly supports Nuclei templates, enabling easy adoption and integration with existing workflows.
   - Most templates are supported, though Workflows and exotic template features aren't currently supported.
 - **Unparalleled Speed**: Built with Rust for high performance and efficiency.
-- **Request Optimization**: Sends minimal requests while achieving accurate results through intelligent caching and deduplication.
+- **Request Optimization**: Sends minimal requests while achieving accurate results through intelligent request caching.
 - **Lightweight and Scalable**: Designed for both individual researchers and large-scale scanning operations.
 - **Photon Lib**: Integrate against Photon directly using the `photon` library.
+- **Photon DSL**: Standalone Nuclei-compatible DSL written from scratch for simplicity and stability. 
 
 
 ## Why Photon? 🔍

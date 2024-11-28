@@ -20,13 +20,19 @@ Photon stands out with its **focus on efficiency**:
 - **Caching Responses**: Reuses responses intelligently to reduce network load and scan time.
 - **Resource Efficiency**: Optimized for low CPU and memory consumption, making it suitable for constrained environments.
 - **Careful Scanning**: Photon carefully scans, making sure not to overload the target by only having one concurrent request at any given time.
-  - Will support multiple concurrent requests in the future
+  - Will support multiple concurrent requests in the future.
+
 
 ## Installation 🛠️
 
-Installing from source or via Cargo is currently the only available option to install Photon.
+Installing from source or via Cargo are currently the only available options to install Photon.
 
 Ensure you have the [Rust](https://github.com/rust-lang/rust) toolchain installed.
+### Using Cargo
+```bash
+cargo install --git https://github.com/aftra-software/photon.git
+```
+
 ### From Source
 ```bash
 git clone https://github.com/aftra-software/photon.git
@@ -35,10 +41,6 @@ cargo build --release
 sudo mv target/release/photon /usr/local/bin/
 ```
 
-### Using Cargo
-```bash
-cargo install --git https://github.com/aftra-software/photon.git
-```
 
 ## Usage 📖
 

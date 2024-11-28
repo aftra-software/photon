@@ -9,7 +9,11 @@ use bincode::{Decode, Encode};
 use curl::easy::{Easy2, List};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
 use httparse::Status;
-use photon_dsl::{dsl::Value, parser::compile_expression, GLOBAL_FUNCTIONS};
+use photon_dsl::{
+    dsl::{Value, VariableContainer},
+    parser::compile_expression,
+    GLOBAL_FUNCTIONS,
+};
 use regex::Regex;
 
 use crate::{
@@ -39,7 +43,6 @@ pub struct HttpReq {
 
 fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
     let mut baked = inp.to_string();
-    let flattened = ctx.flatten_variables();
     loop {
         let tmp = baked.clone();
         let matches: Vec<regex::Match<'_>> = BRACKET_PATTERN
@@ -54,7 +57,7 @@ fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
         for mat in matches.iter() {
             let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
             if let Ok(expr) = compiled {
-                let res = expr.execute(&flattened, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                let res = expr.execute(&ctx, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
                 if let Ok(Value::String(ret)) = res {
                     baked = baked.replace(mat.as_str(), &ret);
                     updated += 1;
@@ -212,8 +215,8 @@ impl HttpReq {
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
         let mut raw_data = self.bake_raw(ctx)?;
-        if let Value::String(hostname) = ctx.flatten_variables().get("Hostname").unwrap() {
-            if !raw_data.contains(hostname) {
+        if let Value::String(hostname) = ctx.get("Hostname").unwrap() {
+            if !raw_data.contains(&hostname) {
                 // We don't want to do this request, expected hostname is missing
                 return None;
             }

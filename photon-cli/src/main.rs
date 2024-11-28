@@ -13,9 +13,6 @@ struct Args {
     #[arg(short, long, default_value_t = String::from("nuclei-templates"))]
     templates: String,
 
-    #[arg(long, default_value_t = String::from("test.dsl"))]
-    test: String,
-
     #[arg(short, long, default_value_t = false, action)]
     verbose: bool,
 

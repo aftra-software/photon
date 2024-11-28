@@ -66,7 +66,12 @@ pub fn set_config(config: Config) {
 }
 
 pub fn add_global_function(name: &str, f: DslFunc) {
-    GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap().insert(name.into(), f);
+    GLOBAL_FUNCTIONS
+        .get()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .insert(name.into(), f);
 }
 
 pub fn initialize() {
@@ -119,5 +124,8 @@ pub fn initialize() {
         }),
     );
 
-    GLOBAL_FUNCTIONS.set(Mutex::from(functions)).map_err(|_| ()).unwrap();
+    GLOBAL_FUNCTIONS
+        .set(Mutex::from(functions))
+        .ok()
+        .unwrap();
 }

@@ -8,7 +8,7 @@ use crate::{
 };
 use curl::easy::{Easy2, Handler, WriteError};
 use photon_dsl::{
-    dsl::{CompiledExpression, Value},
+    dsl::{CompiledExpression, Value, VariableContainer},
     GLOBAL_FUNCTIONS,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -104,27 +104,6 @@ pub struct Context {
 }
 
 impl Context {
-    // Returns a variable mapping, where the parent's variables have lower priority
-    // Than the current context's variables
-    // TODO: Probably incredibly slow
-    pub fn flatten_variables(&self) -> FxHashMap<String, Value> {
-        if self.parent.is_some() {
-            let mut variables = self
-                .parent
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .flatten_variables();
-            for (k, v) in self.variables.iter() {
-                variables.insert(k.clone(), v.clone());
-            }
-            variables
-        } else {
-            self.variables.clone()
-        }
-    }
-
     pub fn insert_str(&mut self, key: &str, value: &str) {
         self.variables
             .insert(key.to_string(), Value::String(value.to_string()));
@@ -136,6 +115,54 @@ impl Context {
 
     pub fn insert(&mut self, key: &str, value: Value) {
         self.variables.insert(key.to_string(), value);
+    }
+}
+
+// Recursive context container, check current variables, if not found check parent
+impl VariableContainer for Context {
+    fn contains_key(&self, key: &str) -> bool {
+        if self.parent.is_some() {
+            self.variables.contains_key(key)
+                || self
+                    .parent
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .contains_key(key)
+        } else {
+            self.variables.contains_key(key)
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<Value> {
+        if self.contains_key(key) {
+            if self.variables.contains_key(key) {
+                Some(self.variables.get(key).unwrap().clone())
+            } else {
+                Some(
+                    self.parent
+                        .as_ref()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .get(key)
+                        .unwrap(),
+                )
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl VariableContainer for &Context {
+    fn contains_key(&self, key: &str) -> bool {
+        (*self).contains_key(key)
+    }
+
+    fn get(&self, key: &str) -> Option<Value> {
+        (*self).get(key)
     }
 }
 
@@ -210,15 +237,16 @@ impl Matcher {
         let data = response_to_string(data, self.part);
         match &self.r#type {
             MatcherType::DSL(dsls) => {
-                let vars = context.flatten_variables();
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                        let res = expr
+                            .execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                        let res = expr
+                            .execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }
@@ -266,12 +294,13 @@ impl Extractor {
 
         let data = response_to_string(data, self.part);
         match &self.r#type {
-            MatcherType::DSL(dsls) => {
-                let vars = context.flatten_variables();
-                dsls.iter()
-                    .flat_map(|expr| expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap()).ok())
-                    .next()
-            }
+            MatcherType::DSL(dsls) => dsls
+                .iter()
+                .flat_map(|expr| {
+                    expr.execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap())
+                        .ok()
+                })
+                .next(),
             MatcherType::Regex(regexes) => regexes
                 .iter()
                 .flat_map(|pattern| {

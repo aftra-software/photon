@@ -545,13 +545,19 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
     }
 }
 
-fn execute_bytecode<F>(
+pub trait VariableContainer {
+    fn contains_key(&self, key: &str) -> bool;
+    fn get(&self, key: &str) -> Option<Value>;
+}
+
+fn execute_bytecode<F, C>(
     compiled: &CompiledExpression,
-    variables: &FxHashMap<String, Value>,
+    variables: &C,
     functions: &FxHashMap<String, F>,
 ) -> Result<Value, ()>
 where
     F: Fn(&mut DSLStack) -> Result<(), ()>,
+    C: VariableContainer,
 {
     let mut stack = DSLStack::new();
     let bytecode = &compiled.0;
@@ -659,13 +665,14 @@ where
 }
 
 impl CompiledExpression {
-    pub fn execute<F>(
+    pub fn execute<F, C>(
         &self,
-        variables: &FxHashMap<String, Value>,
+        variables: &C,
         functions: &FxHashMap<String, F>,
     ) -> Result<Value, ()>
     where
         F: Fn(&mut DSLStack) -> Result<(), ()>,
+        C: VariableContainer,
     {
         execute_bytecode(self, variables, functions)
     }

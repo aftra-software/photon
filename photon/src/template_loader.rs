@@ -513,6 +513,7 @@ fn parse_variables(yaml: &Yaml) -> Vec<(String, Value)> {
     let regex_pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
     for (k, v) in hash {
         if k.is_array() || v.is_array() {
+            // TODO: Array support required in DSL
             continue;
         }
         let key = k.as_str().unwrap();

@@ -124,8 +124,5 @@ pub fn initialize() {
         }),
     );
 
-    GLOBAL_FUNCTIONS
-        .set(Mutex::from(functions))
-        .ok()
-        .unwrap();
+    GLOBAL_FUNCTIONS.set(Mutex::from(functions)).ok().unwrap();
 }

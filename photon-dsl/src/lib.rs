@@ -45,12 +45,41 @@ pub fn set_config(config: Config) {
 
 #[cfg(test)]
 mod tests {
-    //use super::*;
+    use dsl::{Value, VariableContainer};
+    use parser::compile_expression;
+
+    use super::*;
+
+    struct NoVariables;
+
+    impl VariableContainer for NoVariables {
+        fn contains_key(&self, _: &str) -> bool {
+            false
+        }
+        fn get(&self, _: &str) -> Option<Value> {
+            None
+        }
+    }
 
     #[test]
-    fn it_works() {
-        // TODO: Add tests here
-        //let result = add(2, 2);
-        //assert_eq!(result, 4);
+    fn basic_functionality() {
+        let mut functions: FxHashMap<String, DslFunc> = FxHashMap::default();
+
+        functions.insert(
+            "contains".into(),
+            Box::new(|stack: &mut DSLStack| {
+                let needle = stack.pop_string()?;
+                let haystack = stack.pop_string()?;
+                stack.push(Value::Boolean(haystack.contains(&needle)));
+                Ok(())
+            }),
+        );
+
+        let compiled = compile_expression("contains(\"Hello World!\", \"Hello\")");
+        assert!(compiled.is_ok());
+
+        let res = compiled.unwrap().execute(&NoVariables, &functions);
+        assert!(res.is_ok());
+        assert!(res.unwrap() == Value::Boolean(true));
     }
 }

@@ -51,7 +51,6 @@ mod tests {
     use super::*;
 
     struct NoVariables;
-
     impl VariableContainer for NoVariables {
         fn contains_key(&self, _: &str) -> bool {
             false

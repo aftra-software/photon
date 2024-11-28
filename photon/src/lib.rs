@@ -57,15 +57,16 @@ pub fn set_verbose(state: bool) {
 }
 
 pub fn set_config(config: Config) {
-    // Set same config in DSL lib
-    // TODO: make config more similar to CURL, where we do things like
-    // photon_dsl::set_debug(true)
     photon_dsl::set_config(photon_dsl::Config {
         verbose: config.verbose,
         debug: config.debug,
     });
 
     *CONFIG.lock().unwrap() = config;
+}
+
+pub fn add_global_function(name: &str, f: DslFunc) {
+    GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap().insert(name.into(), f);
 }
 
 pub fn initialize() {
@@ -118,5 +119,5 @@ pub fn initialize() {
         }),
     );
 
-    GLOBAL_FUNCTIONS.set(functions).map_err(|_| ()).unwrap();
+    GLOBAL_FUNCTIONS.set(Mutex::from(functions)).map_err(|_| ()).unwrap();
 }

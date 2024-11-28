@@ -213,12 +213,12 @@ impl Matcher {
                 let vars = context.flatten_variables();
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr.execute(&vars, GLOBAL_FUNCTIONS.get().unwrap());
+                        let res = expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr.execute(&vars, GLOBAL_FUNCTIONS.get().unwrap());
+                        let res = expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }
@@ -269,7 +269,7 @@ impl Extractor {
             MatcherType::DSL(dsls) => {
                 let vars = context.flatten_variables();
                 dsls.iter()
-                    .flat_map(|expr| expr.execute(&vars, GLOBAL_FUNCTIONS.get().unwrap()).ok())
+                    .flat_map(|expr| expr.execute(&vars, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap()).ok())
                     .next()
             }
             MatcherType::Regex(regexes) => regexes

@@ -30,7 +30,7 @@ pub struct Config {
 }
 
 pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
-pub static GLOBAL_FUNCTIONS: OnceLock<FxHashMap<String, DslFunc>> = OnceLock::new();
+pub static GLOBAL_FUNCTIONS: OnceLock<Mutex<FxHashMap<String, DslFunc>>> = OnceLock::new();
 
 static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
 

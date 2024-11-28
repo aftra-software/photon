@@ -54,7 +54,7 @@ fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
         for mat in matches.iter() {
             let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
             if let Ok(expr) = compiled {
-                let res = expr.execute(&flattened, GLOBAL_FUNCTIONS.get().unwrap());
+                let res = expr.execute(&flattened, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
                 if let Ok(Value::String(ret)) = res {
                     baked = baked.replace(mat.as_str(), &ret);
                     updated += 1;

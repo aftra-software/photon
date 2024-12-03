@@ -34,7 +34,7 @@ pub enum Method {
     OPTIONS,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MatcherType {
     Word(Vec<String>),
     DSL(Vec<CompiledExpression>),
@@ -57,7 +57,7 @@ pub enum Condition {
     OR,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Info {
     pub name: String,
     pub author: String,
@@ -67,7 +67,7 @@ pub struct Info {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Matcher {
     pub r#type: MatcherType,
     pub name: Option<String>,
@@ -78,7 +78,7 @@ pub struct Matcher {
     pub condition: Condition,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Extractor {
     pub r#type: MatcherType,
     pub name: Option<String>,
@@ -87,7 +87,7 @@ pub struct Extractor {
     pub part: ResponsePart,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpRequest {
     pub extractors: Vec<Extractor>,
     pub matchers: Vec<Matcher>,
@@ -166,7 +166,7 @@ impl VariableContainer for &Context {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Template {
     pub id: String,
     pub info: Info,

@@ -32,7 +32,7 @@ pub struct HttpResponse {
     pub duration: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpReq {
     pub method: Method,
     pub headers: Vec<String>,

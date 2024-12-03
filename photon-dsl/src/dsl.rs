@@ -59,13 +59,13 @@ pub enum Value {
     // TODO: Add Array support
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Bytecode {
     Instr(OPCode),
     Value(Value),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompiledExpression(Vec<Bytecode>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]

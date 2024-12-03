@@ -47,6 +47,22 @@ where
         }
     }
 
+    // Usess more memory than `from` since it copies the TemplateLoader
+    pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
+        Self {
+            ctx: Rc::from(Mutex::from(Context {
+                variables: FxHashMap::default(),
+                parent: None,
+            })),
+            total_reqs: 0,
+            templates: templ_loader.loaded_templates.clone(),
+            cache: templ_loader.cache.clone(),
+            regex_cache: templ_loader.regex_cache.clone(),
+            template_callback: None,
+            match_callback: None,
+        }
+    }
+
     pub fn get_total_reqs(&self) -> u32 {
         self.total_reqs
     }

@@ -11,6 +11,7 @@ use crate::{http::HttpResponse, template::Method};
 // (Method, Headers, Path)
 pub struct CacheKey(pub Method, pub Vec<String>, pub String);
 
+#[derive(Clone)]
 pub struct Cache {
     inner: HashMap<CacheKey, Option<Vec<u8>>>,
     current_tokens: HashMap<CacheKey, u16>,
@@ -84,6 +85,7 @@ impl Cache {
     }
 }
 
+#[derive(Clone)]
 pub struct RegexCache {
     patterns: Vec<Regex>,
     known: FxHashMap<String, u32>,

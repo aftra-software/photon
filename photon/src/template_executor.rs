@@ -13,10 +13,11 @@ use crate::{
     template_loader::TemplateLoader,
 };
 
-pub struct TemplateExecutor<T, K>
+pub struct TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
     K: Fn(&Template, Option<String>),
+    C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
     ctx: Rc<Mutex<Context>>,
@@ -25,12 +26,14 @@ where
     regex_cache: RegexCache,
     template_callback: Option<T>,
     match_callback: Option<K>,
+    continue_predicate: Option<C>,
 }
 
-impl<T, K> TemplateExecutor<T, K>
+impl<T, K, C> TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
     K: Fn(&Template, Option<String>),
+    C: Fn() -> bool,
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
@@ -44,6 +47,7 @@ where
             regex_cache: templ_loader.regex_cache,
             template_callback: None,
             match_callback: None,
+            continue_predicate: None,
         }
     }
 
@@ -60,6 +64,7 @@ where
             regex_cache: templ_loader.regex_cache.clone(),
             template_callback: None,
             match_callback: None,
+            continue_predicate: None,
         }
     }
 
@@ -67,12 +72,13 @@ where
         self.total_reqs
     }
 
-    pub fn set_callbacks(&mut self, template_callback: T, match_callback: K) {
+    pub fn set_callbacks(&mut self, template_callback: T, match_callback: K, continue_predicate: C) {
         self.template_callback = Some(template_callback);
         self.match_callback = Some(match_callback);
+        self.continue_predicate = Some(continue_predicate);
     }
 
-    pub fn execute(&mut self, base_url: &str) {
+    pub fn execute_from(&mut self, base_url: &str, from: usize) {
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
             let parsed: Result<Url, _> = base_url.parse();
@@ -104,7 +110,7 @@ where
             );
         }
 
-        for (i, template) in self.templates.iter().enumerate() {
+        for (i, template) in self.templates.iter().enumerate().skip(from) {
             template.execute(
                 base_url,
                 &mut curl,
@@ -118,5 +124,9 @@ where
                 self.template_callback.as_ref().unwrap()(template, i as u32, self.total_reqs);
             }
         }
+    }
+
+    pub fn execute(&mut self, base_url: &str) {
+        self.execute_from(base_url, 0);
     }
 }

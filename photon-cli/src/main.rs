@@ -79,6 +79,7 @@ fn main() {
                 );
             }
         },
+        || true
     );
 
     executor.execute(base_url);

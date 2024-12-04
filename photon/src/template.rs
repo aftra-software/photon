@@ -429,7 +429,7 @@ impl Collector {
 }
 
 impl Template {
-    pub fn execute<K>(
+    pub fn execute<K, C>(
         &self,
         base_url: &str,
         curl: &mut Easy2<Collector>,
@@ -438,14 +438,24 @@ impl Template {
         cache: &mut Cache,
         regex_cache: &RegexCache,
         callback: &Option<K>,
-    ) where
+        continue_predicate: &Option<C>,
+    )-> bool 
+    where
         K: Fn(&Template, Option<String>),
+        C: Fn() -> bool,
     {
         let ctx = Rc::from(Mutex::from(Context {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));
         for http in self.http.iter() {
+            // Check if we're supposed to continue scanning or not
+            if continue_predicate.is_some() {
+                if !continue_predicate.as_ref().unwrap()() {
+                    return false;
+                }
+            }
+
             let match_results =
                 http.execute(base_url, curl, regex_cache, ctx.clone(), req_counter, cache);
             if !match_results.is_empty() {
@@ -470,5 +480,6 @@ impl Template {
                 }
             }
         }
+        true
     }
 }

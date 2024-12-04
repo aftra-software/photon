@@ -111,7 +111,7 @@ where
         }
 
         for (i, template) in self.templates.iter().enumerate().skip(from) {
-            template.execute(
+            let cont = template.execute(
                 base_url,
                 &mut curl,
                 self.ctx.clone(), // Cheap reference clone
@@ -119,9 +119,13 @@ where
                 &mut self.cache,
                 &self.regex_cache,
                 &self.match_callback,
+                &self.continue_predicate,
             );
             if self.template_callback.is_some() {
                 self.template_callback.as_ref().unwrap()(template, i as u32, self.total_reqs);
+            }
+            if !cont {
+                break
             }
         }
     }

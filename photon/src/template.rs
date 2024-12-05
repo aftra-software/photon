@@ -439,7 +439,7 @@ impl Template {
         regex_cache: &RegexCache,
         callback: &Option<K>,
         continue_predicate: &Option<C>,
-    )-> bool 
+    ) -> bool
     where
         K: Fn(&Template, Option<String>),
         C: Fn() -> bool,

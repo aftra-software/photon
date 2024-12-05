@@ -72,7 +72,12 @@ where
         self.total_reqs
     }
 
-    pub fn set_callbacks(&mut self, template_callback: T, match_callback: K, continue_predicate: C) {
+    pub fn set_callbacks(
+        &mut self,
+        template_callback: T,
+        match_callback: K,
+        continue_predicate: C,
+    ) {
         self.template_callback = Some(template_callback);
         self.match_callback = Some(match_callback);
         self.continue_predicate = Some(continue_predicate);
@@ -125,7 +130,7 @@ where
                 self.template_callback.as_ref().unwrap()(template, i as u32, self.total_reqs);
             }
             if !cont {
-                break
+                break;
             }
         }
     }

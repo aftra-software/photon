@@ -5,6 +5,7 @@ crate-type = ["rlib"]
 name = "photon"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80" # LazyLock stabilized (used in photon-dsl)
 
 [dependencies]
 photon_dsl = { path = "../photon-dsl" }

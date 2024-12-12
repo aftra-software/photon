@@ -5,6 +5,7 @@ crate-type = ["rlib"]
 name = "photon_dsl"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80" # LazyLock stabilized
 
 [dependencies]
 regex = "1.10.6"

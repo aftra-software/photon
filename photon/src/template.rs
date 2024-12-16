@@ -48,6 +48,7 @@ pub enum ResponsePart {
     Raw,
     Header,
     All,
+    Response, // Seems to be an alias for All, https://github.com/projectdiscovery/nuclei/blob/dev/SYNTAX-REFERENCE.md#httprequest
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,7 +196,7 @@ impl Severity {
 
 fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
     match part {
-        ResponsePart::All => {
+        ResponsePart::All | ResponsePart::Response => {
             // TODO: Actually return proper All, now easier using CURL
             let mut parts = vec![];
             data.headers

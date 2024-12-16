@@ -74,6 +74,7 @@ fn map_part(part: &str) -> Option<ResponsePart> {
     match part.to_lowercase().as_str() {
         "header" => Some(ResponsePart::Header),
         "body" => Some(ResponsePart::Body),
+        "response" => Some(ResponsePart::Response),
         "all" => Some(ResponsePart::All),
         "raw" => Some(ResponsePart::Raw),
         _ => None,
@@ -179,13 +180,22 @@ pub fn parse_matcher(
     let matcher_name = yaml["name"].as_str();
     validate_fields(&[(matcher_type, "type")])?;
 
+    let r#type = map_matcher_type(matcher_type.unwrap());
+    if r#type.is_none() {
+        return Err(TemplateError::InvalidValue("type".into()));
+    }
+
+    let mut matcher_type = r#type.unwrap();
+
     let part = {
         let part_mat = match matcher_part {
             Some(match_part) => map_part(match_part),
             None => Some(ResponsePart::Body),
         };
         if part_mat.is_none() {
-            if matchers_condition == Condition::OR {
+            // Mather part is not required if matcher type is DSL
+            // We also currently ignore missing parts if the match is optional either way
+            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::DSL(_)) {
                 return Ok(None);
             } else {
                 return Err(TemplateError::InvalidValue("part".into()));
@@ -206,13 +216,6 @@ pub fn parse_matcher(
     let negative = yaml["negative"].as_bool().unwrap_or(false);
     let internal = yaml["internal"].as_bool().unwrap_or(false);
     let group = yaml["group"].as_i64();
-
-    let r#type = map_matcher_type(matcher_type.unwrap());
-    if r#type.is_none() {
-        return Err(TemplateError::InvalidValue("type".into()));
-    }
-
-    let mut matcher_type = r#type.unwrap();
 
     match &mut matcher_type {
         MatcherType::Word(words) => {

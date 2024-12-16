@@ -123,6 +123,14 @@ pub fn initialize() {
             Ok(())
         }),
     );
+    functions.insert(
+        "len".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let inp = stack.pop_string()?;
+            stack.push(Value::Int(inp.len() as i64));
+            Ok(())
+        }),
+    );
 
     GLOBAL_FUNCTIONS.set(Mutex::from(functions)).ok().unwrap();
 }

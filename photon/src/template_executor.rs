@@ -88,34 +88,42 @@ where
         {
             let parsed: Result<Url, _> = base_url.parse();
             if let Ok(url) = parsed {
-                if let Some(hostname) = url.host_str() {
-                    let mut locked: std::sync::MutexGuard<'_, Context> = self.ctx.lock().unwrap();
-                    locked.insert_str("hostname", hostname);
-                    locked.insert_str("Hostname", hostname);
+                let mut locked: std::sync::MutexGuard<'_, Context> = self.ctx.lock().unwrap();
+                if let Some(port) = url.port_or_known_default() {
+                    locked.insert_int("Port", port as i64);
+                    if let Some(host) = url.host_str() {
+                        let hostname = format!("{host}:{port}");
+                        locked.insert_str("Hostname", &hostname);
+                    }
                 }
+                if let Some(hostname) = url.host_str() {
+                    locked.insert_str("Host", hostname);
+                }
+                locked.insert_str("Scheme", url.scheme());
+                locked.insert_str("Path", url.path());
             }
             // Base URL is the URL passed in, except documented as full url? but full url != base url
             // So for sanity sake we define Root and Base url as the same.
             self.ctx.lock().unwrap().insert_str("BaseURL", base_url);
             self.ctx.lock().unwrap().insert_str("RootURL", base_url);
+        }
 
-            // Some random strings
-            // TODO: Do we want to support arbitrary many random strings?
+        for (i, template) in self.templates.iter().enumerate().skip(from) {
+            // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
             self.ctx.lock().unwrap().insert_str(
                 "randstr",
                 &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
             );
-            self.ctx.lock().unwrap().insert_str(
-                "randstr_1",
-                &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
-            );
-            self.ctx.lock().unwrap().insert_str(
-                "randstr_2",
-                &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
-            );
-        }
 
-        for (i, template) in self.templates.iter().enumerate().skip(from) {
+            // TODO: Do we want to support arbitrary many random strings?
+            // randstr_6 is the highest being used by any template
+            for i in 0..6 {
+                self.ctx.lock().unwrap().insert_str(
+                    &format!("randstr_{}", i + 1),
+                    &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
+                );
+            }
+
             let cont = template.execute(
                 base_url,
                 &mut curl,

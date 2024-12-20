@@ -5,8 +5,8 @@ Photon is a (Work In Progress) blazing-fast and highly efficient security scanni
 
 ## Features 🚀
 
-- **Nuclei Template Compatibility**: Mostly supports Nuclei templates, enabling easy adoption and integration with existing workflows.
-  - Most templates are supported, though Workflows and exotic template features aren't currently supported.
+- **Nuclei Template Compatibility**: Supports most Nuclei templates, enabling easy adoption and integration with existing workflows.
+  - Most templates are supported, though Workflows and exotic template features currently aren't.
 - **Unparalleled Speed**: Built with Rust for high performance and efficiency.
 - **Request Optimization**: Sends minimal requests while achieving accurate results through intelligent request caching.
 - **Lightweight and Scalable**: Designed for both individual researchers and large-scale scanning operations.
@@ -67,6 +67,10 @@ photon --help
 1. Fetch and update the latest Nuclei templates:
    ```bash
    nuclei -update-templates
+   ```
+   or
+   ```bash
+   git clone https://github.com/projectdiscovery/nuclei-templates.git
    ```
 2. Use Photon to scan your target with the updated templates:
    ```bash

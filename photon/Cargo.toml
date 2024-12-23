@@ -5,7 +5,7 @@ crate-type = ["rlib"]
 name = "photon"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80" # LazyLock stabilized (used in photon-dsl)
+rust-version = "1.75"
 
 [dependencies]
 photon_dsl = { path = "../photon-dsl" }
@@ -22,6 +22,7 @@ yaml-rust2 = "0.9.0"
 rand = "0.8.5"
 bincode = "2.0.0-rc.3"
 lz4 = "1.28.0"
+lazy_static = "1.5.0"
 
 [features]
 default = ["curl/ssl"]

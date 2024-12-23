@@ -902,6 +902,7 @@ dependencies = [
  "curl",
  "curl-sys",
  "httparse",
+ "lazy_static",
  "lz4",
  "md-5",
  "photon_dsl",
@@ -925,6 +926,7 @@ dependencies = [
 name = "photon_dsl"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "pest",
  "pest_derive",
  "regex",

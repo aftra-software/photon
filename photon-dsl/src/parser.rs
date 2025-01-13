@@ -29,7 +29,7 @@ pub fn do_parsing(data: &str) -> Result<Expr, ()> {
 
 lazy_static::lazy_static! {
     static ref PRATT_PARSER: PrattParser<Rule> = {
-        use pest::pratt_parser::{Assoc::*, Op};
+        use pest::pratt_parser::{Assoc::Left, Op};
         use Rule::*;
 
         // Precedence is defined lowest to highest
@@ -81,7 +81,7 @@ fn unescape(s: &str) -> Result<String, ()> {
 
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
     match primary.as_rule() {
-        Rule::clause => parse_expr(primary.into_inner()),
+        Rule::expr | Rule::clause => parse_expr(primary.into_inner()),
         Rule::string => Expr::Constant(Value::String(unescape(primary.as_str()).unwrap())),
         Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
         Rule::variable => Expr::Variable(primary.as_str().to_string()),
@@ -117,7 +117,6 @@ fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
 
             Expr::Function(func.to_string(), args)
         }
-        Rule::expr => parse_expr(primary.into_inner()),
         rule => unreachable!("Expr::parse expected atom, found {:?}", rule),
     }
 }

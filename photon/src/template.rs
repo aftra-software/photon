@@ -201,7 +201,7 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
             let mut parts = vec![];
             data.headers
                 .iter()
-                .for_each(|(k, v)| parts.push(format!("{}: {}\n", k, v)));
+                .for_each(|(k, v)| parts.push(format!("{k}: {v}\n")));
             parts.push(data.body.clone());
             parts.concat()
         }
@@ -209,7 +209,7 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
         ResponsePart::Header => data
             .headers
             .iter()
-            .map(|(k, v)| format!("{}: {}\n", k, v))
+            .map(|(k, v)| format!("{k}: {v}\n"))
             .collect::<Vec<String>>()
             .concat(),
         ResponsePart::Raw => {
@@ -217,7 +217,7 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
             let mut parts = vec![];
             data.headers
                 .iter()
-                .for_each(|(k, v)| parts.push(format!("{}: {}\n", k, v)));
+                .for_each(|(k, v)| parts.push(format!("{k}: {v}\n")));
             parts.push(data.body.clone());
             parts.concat()
         }
@@ -270,7 +270,7 @@ impl Matcher {
                     words.iter().all(|needle| data.contains(needle))
                 }
             }
-            _ => false,
+            MatcherType::Status(_) => false,
         }
     }
 
@@ -297,14 +297,14 @@ impl Extractor {
         match &self.r#type {
             MatcherType::DSL(dsls) => dsls
                 .iter()
-                .flat_map(|expr| {
+                .filter_map(|expr| {
                     expr.execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap())
                         .ok()
                 })
                 .next(),
             MatcherType::Regex(regexes) => regexes
                 .iter()
-                .flat_map(|pattern| {
+                .filter_map(|pattern| {
                     regex_cache.match_group(*pattern, &data, self.group.unwrap_or(0) as usize)
                 })
                 .next()
@@ -313,7 +313,7 @@ impl Extractor {
                 debug!("Extractor does not support Word matching");
                 None
             }
-            _ => None,
+            MatcherType::Status(_) => None,
         }
     }
 
@@ -449,7 +449,7 @@ impl Template {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));
-        for http in self.http.iter() {
+        for http in &self.http {
             // Check if we're supposed to continue scanning or not
             if continue_predicate.is_some() && !continue_predicate.as_ref().unwrap()() {
                 return false;
@@ -463,7 +463,7 @@ impl Template {
                 // missing-header:content-security-policy
                 // And want to display the different cases that were matched
                 let mut unique_names = FxHashSet::default();
-                for matched in match_results.iter() {
+                for matched in &match_results {
                     if !matched.internal {
                         unique_names.insert(matched.name.clone());
                     }

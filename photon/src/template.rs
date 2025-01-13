@@ -5,6 +5,7 @@ use crate::{
     cache::{Cache, RegexCache},
     get_config,
     http::{HttpReq, HttpResponse},
+    template_executor::ExecutionOptions,
 };
 use curl::easy::{Easy2, Handler, WriteError};
 use photon_dsl::{
@@ -330,6 +331,7 @@ impl HttpRequest {
     pub fn execute(
         &self,
         base_url: &str,
+        options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         regex_cache: &RegexCache,
         parent_ctx: Rc<Mutex<Context>>,
@@ -344,7 +346,7 @@ impl HttpRequest {
         };
 
         for (idx, req) in self.path.iter().enumerate() {
-            let maybe_resp = req.do_request(base_url, curl, &ctx, req_counter, cache);
+            let maybe_resp = req.do_request(base_url, options, curl, &ctx, req_counter, cache);
             if let Some(resp) = maybe_resp {
                 ctx.insert_str(&format!("body_{}", idx + 1), &resp.body);
                 ctx.insert_str("body", &resp.body);
@@ -430,9 +432,12 @@ impl Collector {
 }
 
 impl Template {
+    // TODO: Look into reducing the number of parameters
+    // There's a lot of stuff we need to pass from a higher context into the templates & requests
     pub fn execute<K, C>(
         &self,
         base_url: &str,
+        options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         parent_ctx: Rc<Mutex<Context>>,
         req_counter: &mut u32,
@@ -455,8 +460,15 @@ impl Template {
                 return false;
             }
 
-            let match_results =
-                http.execute(base_url, curl, regex_cache, ctx.clone(), req_counter, cache);
+            let match_results = http.execute(
+                base_url,
+                options,
+                curl,
+                regex_cache,
+                ctx.clone(),
+                req_counter,
+                cache,
+            );
             if !match_results.is_empty() {
                 // Stupid string printing, for the cases where we have templates like
                 // missing-header:x-iframe-whatever

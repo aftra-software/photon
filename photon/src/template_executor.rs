@@ -13,6 +13,35 @@ use crate::{
     template_loader::TemplateLoader,
 };
 
+pub struct ExecutionOptions {
+    pub extra_headers: Vec<String>,
+    pub user_agent: String,
+}
+
+impl ExecutionOptions {
+    // TODO: do we want this function to fail if header is non-conformant format?
+    pub fn add_header(&mut self, header: &str) {
+        self.extra_headers.push(header.into());
+    }
+
+    pub fn add_kv_header(&mut self, key: &str, value: &str) {
+        self.extra_headers.push(format!("{key}: {value}"));
+    }
+
+    pub fn set_user_agent(&mut self, user_agent: &str) {
+        self.user_agent = user_agent.into();
+    }
+}
+
+impl Default for ExecutionOptions {
+    fn default() -> Self {
+        Self {
+            extra_headers: vec![],
+            user_agent: "Photon/0.2".into(),
+        }
+    }
+}
+
 pub struct TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
@@ -24,6 +53,7 @@ where
     total_reqs: u32,
     cache: Cache,
     regex_cache: RegexCache,
+    options: ExecutionOptions, // Extra user-facing options, e.g. extra Headers from CLI
     template_callback: Option<T>,
     match_callback: Option<K>,
     continue_predicate: Option<C>,
@@ -48,6 +78,7 @@ where
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
+            options: ExecutionOptions::default(),
         }
     }
 
@@ -65,7 +96,12 @@ where
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
+            options: ExecutionOptions::default(),
         }
+    }
+
+    pub fn set_options(&mut self, options: ExecutionOptions) {
+        self.options = options;
     }
 
     pub fn get_total_reqs(&self) -> u32 {
@@ -139,6 +175,7 @@ where
 
             let cont = template.execute(
                 base_url,
+                &self.options,
                 &mut curl,
                 self.ctx.clone(), // Cheap reference clone
                 &mut self.total_reqs,

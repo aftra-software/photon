@@ -20,6 +20,7 @@ use crate::{
     cache::{Cache, CacheKey},
     get_config,
     template::{Collector, Context, Method},
+    template_executor::ExecutionOptions,
 };
 
 pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
@@ -106,6 +107,7 @@ fn parse_headers(contents: &[u8]) -> Option<Vec<(String, String)>> {
 
 fn curl_do_request(
     curl: &mut Easy2<Collector>,
+    options: &ExecutionOptions,
     path: &str,
     body: &[u8],
     headers: &[String],
@@ -117,7 +119,7 @@ fn curl_do_request(
     curl.get_mut().reset(); // Reset collector
     curl.reset(); // Reset handle to initial state, keeping connections open
     curl.cookie_list("ALL").unwrap(); // Reset stored cookies
-    curl.useragent("Photon/0.1").unwrap(); // TODO: Allow customization
+    curl.useragent(&options.user_agent).unwrap(); // TODO: Allow customization
 
     // Setup CURL context for this request
     curl.path_as_is(true).unwrap();
@@ -154,6 +156,9 @@ fn curl_do_request(
 
     let mut parsed_headers = List::new();
     for header in headers.iter() {
+        parsed_headers.append(header).unwrap();
+    }
+    for header in &options.extra_headers {
         parsed_headers.append(header).unwrap();
     }
     curl.http_headers(parsed_headers).unwrap();
@@ -196,10 +201,18 @@ impl HttpReq {
     fn internal_request(
         &self,
         path: &str,
+        options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let resp = curl_do_request(curl, path, self.body.as_bytes(), &self.headers, self.method);
+        let resp = curl_do_request(
+            curl,
+            options,
+            path,
+            self.body.as_bytes(),
+            &self.headers,
+            self.method,
+        );
         if resp.is_some() {
             // Successful request
             *req_counter += 1;
@@ -211,6 +224,7 @@ impl HttpReq {
         &self,
         base_url: &str,
         ctx: &Context,
+        options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
@@ -274,7 +288,14 @@ impl HttpReq {
             headers.push(format!("{}: {}", header.name, val_str.unwrap()));
         }
 
-        let resp = curl_do_request(curl, &path, body.as_bytes(), &self.headers, self.method);
+        let resp = curl_do_request(
+            curl,
+            options,
+            &path,
+            body.as_bytes(),
+            &self.headers,
+            self.method,
+        );
         if resp.is_some() {
             // Successful request
             *req_counter += 1;
@@ -285,13 +306,14 @@ impl HttpReq {
     pub fn do_request(
         &self,
         base_url: &str,
+        options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         ctx: &Context,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Option<HttpResponse> {
         if !self.raw.is_empty() {
-            return self.raw_request(base_url, ctx, curl, req_counter);
+            return self.raw_request(base_url, ctx, options, curl, req_counter);
         }
 
         let path = self.bake(ctx)?;
@@ -305,7 +327,7 @@ impl HttpReq {
         // Skip caching below if we know the request is only happening once
         let key = CacheKey(self.method, self.headers.clone(), self.path.clone());
         if !cache.can_cache(&key) {
-            let res = self.internal_request(&path, curl, req_counter);
+            let res = self.internal_request(&path, options, curl, req_counter);
             if let Some(resp) = res {
                 return Some(resp);
             } else {
@@ -314,7 +336,7 @@ impl HttpReq {
         }
 
         if !cache.contains(&key) {
-            let res = self.internal_request(&path, curl, req_counter);
+            let res = self.internal_request(&path, options, curl, req_counter);
             if let Some(resp) = res {
                 cache.store(&key, Some(resp));
             } else {

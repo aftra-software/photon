@@ -1,6 +1,7 @@
 use std::{sync::Mutex, time::Instant};
 
 use clap::Parser;
+use photon::template_executor::ExecutionOptions;
 use photon::{initialize, set_config};
 use photon::{template_executor::TemplateExecutor, template_loader::TemplateLoader};
 
@@ -21,6 +22,12 @@ struct Args {
 
     #[arg(short, long, default_value_t = false, action)]
     stats: bool,
+
+    #[arg(short = 'U', long)]
+    user_agent: Option<String>,
+
+    #[arg(short = 'H', long)]
+    header: Option<Vec<String>>,
 }
 
 fn main() {
@@ -47,6 +54,19 @@ fn main() {
     }
 
     let mut executor = TemplateExecutor::from(templ_loader);
+
+    let mut options = ExecutionOptions::default();
+
+    if let Some(headers) = args.header {
+        for header in headers {
+            options.add_header(&header);
+        }
+    }
+    if let Some(user_agent) = args.user_agent {
+        options.set_user_agent(&user_agent);
+    }
+
+    executor.set_options(options);
     executor.set_callbacks(
         |_, i, reqs| {
             let mut locked_stopwatch = stopwatch.lock().unwrap();

@@ -491,10 +491,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
 
     requests.append(&mut raw);
 
-    let flattened_headers: Vec<String> = headers
-        .iter()
-        .map(|(k, v)| format!("{k}: {v}"))
-        .collect();
+    let flattened_headers: Vec<String> = headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
 
     requests
         .iter_mut()

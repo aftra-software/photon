@@ -451,10 +451,8 @@ impl Template {
         }));
         for http in self.http.iter() {
             // Check if we're supposed to continue scanning or not
-            if continue_predicate.is_some() {
-                if !continue_predicate.as_ref().unwrap()() {
-                    return false;
-                }
+            if continue_predicate.is_some() && !continue_predicate.as_ref().unwrap()() {
+                return false;
             }
 
             let match_results =

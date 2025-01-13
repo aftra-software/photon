@@ -102,7 +102,7 @@ fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
 fn validate_fields(fields: &[(Option<&str>, &str)]) -> Result<(), TemplateError> {
     for (field, name) in fields {
         if field.is_none() {
-            return Err(TemplateError::MissingField(name.to_string()));
+            return Err(TemplateError::MissingField((*name).to_string()));
         }
     }
     Ok(())
@@ -123,7 +123,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     let description = if let Some(desc) = info_description {
         desc.to_string()
     } else {
-        "".to_string()
+        String::new()
     };
 
     let severity = map_severity(info_severity.unwrap());
@@ -337,7 +337,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     let body = if let Some(body) = http_body {
         body.to_string()
     } else {
-        String::from("")
+        String::new()
     };
 
     let matchers_condition = if yaml["matchers-condition"].is_badvalue() {
@@ -355,11 +355,11 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         .map(|item| parse_matcher(item, matchers_condition, regex_cache))
         .collect();
 
-    if matchers_parsed.iter().any(|item| item.is_err()) {
+    if matchers_parsed.iter().any(Result::is_err) {
         if matchers_condition == Condition::AND {
             return Err(matchers_parsed
                 .into_iter()
-                .find(|item| item.is_err())
+                .find(Result::is_err)
                 .unwrap()
                 .unwrap_err());
         } else {
@@ -379,17 +379,17 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .iter()
             .map(|item| parse_matcher(item, matchers_condition, regex_cache))
             .collect();
-        if extractors_parsed.iter().any(|item| item.is_err()) {
+        if extractors_parsed.iter().any(Result::is_err) {
             return Err(extractors_parsed
                 .into_iter()
-                .find(|item| item.is_err())
+                .find(Result::is_err)
                 .unwrap()
                 .unwrap_err());
         }
         extractors_parsed
             .into_iter()
             .flatten()
-            .flat_map(|item| {
+            .filter_map(|item| {
                 if let Some(matcher) = item {
                     Some(Extractor {
                         r#type: matcher.r#type,
@@ -417,7 +417,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 method,
                 body: body.clone(),
                 path: item.as_str().unwrap().to_string(),
-                raw: "".into(),
+                raw: String::new(),
                 headers: Vec::new(),
             })
             .collect()
@@ -430,7 +430,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 method,
                 body: body.clone(),
                 path: item.to_string(),
-                raw: "".into(),
+                raw: String::new(),
                 headers: Vec::new(),
             })
             .collect()
@@ -446,7 +446,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .map(|item| HttpReq {
                 method,
                 body: body.clone(),
-                path: "".into(),
+                path: String::new(),
                 raw: item.as_str().unwrap().to_string(),
                 headers: Vec::new(),
             })
@@ -455,7 +455,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         vec![HttpReq {
             method,
             body: body.clone(),
-            path: "".into(),
+            path: String::new(),
             raw: yaml["raw"].as_str().unwrap().into(),
             headers: Vec::new(),
         }]
@@ -493,7 +493,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
 
     let flattened_headers: Vec<String> = headers
         .iter()
-        .map(|(k, v)| format!("{}: {}", k, v))
+        .map(|(k, v)| format!("{k}: {v}"))
         .collect();
 
     requests
@@ -569,10 +569,10 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
             .collect()
     };
 
-    if http_parsed.iter().any(|item| item.is_err()) {
+    if http_parsed.iter().any(Result::is_err) {
         return Err(http_parsed
             .into_iter()
-            .find(|item| item.is_err())
+            .find(Result::is_err)
             .unwrap()
             .unwrap_err());
     }
@@ -639,9 +639,9 @@ impl TemplateLoader {
         );
 
         let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
-        for template in loaded_templates.iter() {
-            for http in template.http.iter() {
-                for request in http.path.iter() {
+        for template in &loaded_templates {
+            for http in &template.http {
+                for request in &http.path {
                     tokens
                         .entry(CacheKey(
                             request.method,

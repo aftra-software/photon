@@ -91,7 +91,11 @@ where
 
             // TODO: Do additional validation to make sure we don't run into the case where
             // CURL can find the certs but openssl_probe can't.
-            curl.capath(r.cert_dir.expect("Unable to find certificate, cannot continue with HTTPS")).unwrap();
+            curl.capath(
+                r.cert_dir
+                    .expect("Unable to find certificate, cannot continue with HTTPS"),
+            )
+            .unwrap();
         }
 
         {

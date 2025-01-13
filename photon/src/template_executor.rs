@@ -85,6 +85,15 @@ where
 
     pub fn execute_from(&mut self, base_url: &str, from: usize) {
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
+        if base_url.starts_with("https") {
+            // Manually find and set CA certificates, solves a lot of issues with statically linked libcurl.
+            let r = openssl_probe::probe();
+
+            // TODO: Do additional validation to make sure we don't run into the case where
+            // CURL can find the certs but openssl_probe can't.
+            curl.capath(r.cert_dir.expect("Unable to find certificate, cannot continue with HTTPS")).unwrap();
+        }
+
         {
             let parsed: Result<Url, _> = base_url.parse();
             if let Ok(url) = parsed {

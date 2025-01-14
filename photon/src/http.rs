@@ -143,11 +143,16 @@ fn curl_do_request(
     }
 
     curl.cookie_list("ALL").unwrap(); // Reset stored cookies
-    curl.useragent(&options.user_agent).unwrap(); // TODO: Allow customization
+    curl.useragent(&options.user_agent).unwrap();
+
+    // Don't verify received cert
+    curl.ssl_verify_peer(false).unwrap();
+    curl.ssl_verify_host(false).unwrap();
 
     // Setup CURL context for this request
     curl.path_as_is(true).unwrap();
     curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
+    curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
     curl.url(path).unwrap();
 
@@ -197,10 +202,13 @@ fn curl_do_request(
     }
 
     let duration = stopwatch.elapsed().as_secs_f32();
-
+    
     let contents = curl.get_ref();
     let body = String::from_utf8_lossy(&contents.0);
     let headers = parse_headers(&contents.1)?;
+    debug!("Got status {} for URL '{}', took {:.2}s", curl.response_code().unwrap(), path, duration);
+    debug!("Body len: {}", body.len());
+    debug!("Body: {}", body);
 
     let resp = HttpResponse {
         body: body.to_string(),

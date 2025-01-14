@@ -1,6 +1,8 @@
 use core::str;
 use std::{
-    collections::HashSet, sync::{Mutex, OnceLock}, time::{Duration, Instant}
+    collections::HashSet,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use bincode::{Decode, Encode};
@@ -137,10 +139,7 @@ fn curl_do_request(
     if path.starts_with("https") {
         // CURL resets CAINFO on Easy handle reset
         // https://github.com/curl/curl/blob/9e54db2707214ac1e4c332c606b692ec2e88cd43/lib/easy.c#L1082
-        curl.cainfo(
-            find_ca(),
-        )
-        .unwrap();
+        curl.cainfo(find_ca()).unwrap();
     }
 
     curl.cookie_list("ALL").unwrap(); // Reset stored cookies

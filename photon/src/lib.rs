@@ -135,11 +135,11 @@ fn init_functions() -> FxHashMap<String, DslFunc> {
         "hex_decode".into(),
         Box::new(|stack: &mut DSLStack| {
             let inp = stack.pop_string()?;
-            let decoded_vec =  base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
+            let decoded_vec = base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
             let decoded_str = String::from_utf8_lossy(&decoded_vec);
             stack.push(Value::String(String::from(decoded_str)));
             Ok(())
-        })
+        }),
     );
 
     functions
@@ -147,7 +147,7 @@ fn init_functions() -> FxHashMap<String, DslFunc> {
 
 pub fn initialize() {
     if GLOBAL_FUNCTIONS.get().is_some() {
-        return; // Don't waste time 
+        return; // Don't waste time
     }
 
     let _ = BRACKET_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
@@ -184,15 +184,36 @@ mod tests {
 
     #[test]
     fn test_functions() {
-        photon_dsl::set_config(photon_dsl::Config { verbose: true, debug: true });
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: true,
+            debug: true,
+        });
         let functions: FxHashMap<String, DslFunc> = init_functions();
 
-        assert!(test_expression(&functions, "hex_decode('7072756661313233') == 'prufa123'"));
+        assert!(test_expression(
+            &functions,
+            "hex_decode('7072756661313233') == 'prufa123'"
+        ));
         assert!(test_expression(&functions, "len('abcdef') == 6"));
-        assert!(test_expression(&functions, "to_lower('ABCdef') == 'abcdef'"));
-        assert!(test_expression(&functions, "to_lower('ABCdef') == tolower('ABCdef')"));
-        assert!(test_expression(&functions, "contains('123ABC123', 'ABC') && !contains('123', 'ABC')"));
-        assert!(test_expression(&functions, "regex('1\\\\w*2', 'blabla1blabla2')"));
-        assert!(test_expression(&functions, "md5('test') == '098f6bcd4621d373cade4e832627b4f6'"));
+        assert!(test_expression(
+            &functions,
+            "to_lower('ABCdef') == 'abcdef'"
+        ));
+        assert!(test_expression(
+            &functions,
+            "to_lower('ABCdef') == tolower('ABCdef')"
+        ));
+        assert!(test_expression(
+            &functions,
+            "contains('123ABC123', 'ABC') && !contains('123', 'ABC')"
+        ));
+        assert!(test_expression(
+            &functions,
+            "regex('1\\\\w*2', 'blabla1blabla2')"
+        ));
+        assert!(test_expression(
+            &functions,
+            "md5('test') == '098f6bcd4621d373cade4e832627b4f6'"
+        ));
     }
 }

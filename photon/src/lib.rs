@@ -76,9 +76,7 @@ pub fn add_global_function(name: &str, f: DslFunc) {
         .insert(name.into(), f);
 }
 
-pub fn initialize() {
-    let _ = BRACKET_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
-
+fn init_functions() -> FxHashMap<String, DslFunc> {
     let mut functions: FxHashMap<String, DslFunc> = FxHashMap::default();
 
     functions.insert(
@@ -95,7 +93,7 @@ pub fn initialize() {
         Box::new(|stack: &mut DSLStack| {
             let inp = stack.pop_string()?;
             let patt = stack.pop_string()?;
-            let reg = Regex::new(&patt).map_err(|_| ())?;
+            let reg = Regex::new(&patt).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
             stack.push(Value::Boolean(reg.is_match(&inp)));
             Ok(())
         }),
@@ -133,6 +131,68 @@ pub fn initialize() {
             Ok(())
         }),
     );
+    functions.insert(
+        "hex_decode".into(),
+        Box::new(|stack: &mut DSLStack| {
+            let inp = stack.pop_string()?;
+            let decoded_vec =  base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
+            let decoded_str = String::from_utf8_lossy(&decoded_vec);
+            stack.push(Value::String(String::from(decoded_str)));
+            Ok(())
+        })
+    );
+
+    functions
+}
+
+pub fn initialize() {
+    if GLOBAL_FUNCTIONS.get().is_some() {
+        return; // Don't waste time 
+    }
+
+    let _ = BRACKET_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
+    let functions = init_functions();
 
     GLOBAL_FUNCTIONS.set(Mutex::from(functions)).ok().unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use photon_dsl::dsl::{Value, VariableContainer};
+    use photon_dsl::parser::compile_expression;
+
+    use super::*;
+
+    struct NoVariables;
+    impl VariableContainer for NoVariables {
+        fn contains_key(&self, _: &str) -> bool {
+            false
+        }
+        fn get(&self, _: &str) -> Option<Value> {
+            None
+        }
+    }
+
+    fn test_expression(fns: &FxHashMap<String, DslFunc>, expr: &str) -> bool {
+        let compiled = compile_expression(expr);
+        assert!(compiled.is_ok());
+
+        let res = compiled.unwrap().execute(&NoVariables, &fns);
+        assert!(res.is_ok());
+        res.unwrap() == Value::Boolean(true)
+    }
+
+    #[test]
+    fn test_functions() {
+        photon_dsl::set_config(photon_dsl::Config { verbose: true, debug: true });
+        let functions: FxHashMap<String, DslFunc> = init_functions();
+
+        assert!(test_expression(&functions, "hex_decode('7072756661313233') == 'prufa123'"));
+        assert!(test_expression(&functions, "len('abcdef') == 6"));
+        assert!(test_expression(&functions, "to_lower('ABCdef') == 'abcdef'"));
+        assert!(test_expression(&functions, "to_lower('ABCdef') == tolower('ABCdef')"));
+        assert!(test_expression(&functions, "contains('123ABC123', 'ABC') && !contains('123', 'ABC')"));
+        assert!(test_expression(&functions, "regex('1\\\\w*2', 'blabla1blabla2')"));
+        assert!(test_expression(&functions, "md5('test') == '098f6bcd4621d373cade4e832627b4f6'"));
+    }
 }

@@ -18,6 +18,14 @@ pub struct ExecutionOptions {
     pub user_agent: String,
 }
 
+type ScanResult<T> = std::result::Result<T, ScanError>;
+
+#[derive(Debug, Clone)]
+pub enum ScanError {
+    MissingScheme,
+    UrlParseError,
+}
+
 impl ExecutionOptions {
     // TODO: do we want this function to fail if header is non-conformant format?
     pub fn add_header(&mut self, header: &str) {
@@ -119,7 +127,7 @@ where
         self.continue_predicate = Some(continue_predicate);
     }
 
-    pub fn execute_from(&mut self, base_url: &str, from: usize) {
+    pub fn execute_from(&mut self, base_url: &str, from: usize) -> ScanResult<()> {
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
             let parsed: Result<Url, _> = base_url.parse();
@@ -137,6 +145,13 @@ where
                 }
                 locked.insert_str("Scheme", url.scheme());
                 locked.insert_str("Path", url.path());
+            } else {
+                match parsed.err().unwrap() {
+                    url::ParseError::RelativeUrlWithoutBase => {
+                        return Err(ScanError::MissingScheme)
+                    }
+                    _ => return Err(ScanError::UrlParseError),
+                }
             }
             // Base URL is the URL passed in, except documented as full url? but full url != base url
             // So for sanity sake we define Root and Base url as the same.
@@ -178,9 +193,11 @@ where
                 break;
             }
         }
+
+        Ok(())
     }
 
-    pub fn execute(&mut self, base_url: &str) {
-        self.execute_from(base_url, 0);
+    pub fn execute(&mut self, base_url: &str) -> ScanResult<()> {
+        self.execute_from(base_url, 0)
     }
 }

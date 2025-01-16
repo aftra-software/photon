@@ -1,7 +1,7 @@
 use std::{sync::Mutex, time::Instant};
 
 use clap::Parser;
-use photon::template_executor::ExecutionOptions;
+use photon::template_executor::{ExecutionOptions, ScanError};
 use photon::{initialize, set_config};
 use photon::{template_executor::TemplateExecutor, template_loader::TemplateLoader};
 
@@ -102,7 +102,14 @@ fn main() {
         || true,
     );
 
-    executor.execute(base_url);
-
-    println!("Total requests: {}", executor.get_total_reqs());
+    let res = executor.execute(base_url);
+    if let Err(err) = res {
+        let err_msg = match err {
+            ScanError::MissingScheme => "Missing URL Scheme",
+            ScanError::UrlParseError => "Error parsing URL",
+        };
+        println!("ERROR: {err_msg}");
+    } else {
+        println!("Total requests: {}", executor.get_total_reqs());
+    }
 }

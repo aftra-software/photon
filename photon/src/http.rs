@@ -202,11 +202,16 @@ fn curl_do_request(
     }
 
     let duration = stopwatch.elapsed().as_secs_f32();
-    
+
     let contents = curl.get_ref();
     let body = String::from_utf8_lossy(&contents.0);
     let headers = parse_headers(&contents.1)?;
-    debug!("Got status {} for URL '{}', took {:.2}s", curl.response_code().unwrap(), path, duration);
+    debug!(
+        "Got status {} for URL '{}', took {:.2}s",
+        curl.response_code().unwrap(),
+        path,
+        duration
+    );
     debug!("Body len: {}", body.len());
     debug!("Body: {}", body);
 

@@ -97,8 +97,6 @@ pub struct HttpRequest {
     pub path: Vec<HttpReq>,
 }
 
-// TODO: Maybe make this implement HashMap or something to not create a new temporary flattened each usage.
-// e.g. implement Context as a DataStructure so that indexing a key does the flattening dynamically
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,

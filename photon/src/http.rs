@@ -213,7 +213,6 @@ fn curl_do_request(
         duration
     );
     debug!("Body len: {}", body.len());
-    debug!("Body: {}", body);
 
     let resp = HttpResponse {
         body: body.to_string(),

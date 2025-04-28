@@ -6,12 +6,10 @@ use crate::{
     get_config,
     http::{HttpReq, HttpResponse},
     template_executor::ExecutionOptions,
+    PhotonContext,
 };
 use curl::easy::{Easy2, Handler, WriteError};
-use photon_dsl::{
-    dsl::{CompiledExpression, Value, VariableContainer},
-    GLOBAL_FUNCTIONS,
-};
+use photon_dsl::dsl::{CompiledExpression, Value, VariableContainer};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy)]
@@ -229,6 +227,7 @@ impl Matcher {
         data: &HttpResponse,
         regex_cache: &RegexCache,
         context: &Context,
+        photon_context: &PhotonContext,
     ) -> bool {
         if let MatcherType::Status(_) = self.r#type {
             return self.matches_status(data.status_code);
@@ -239,14 +238,12 @@ impl Matcher {
             MatcherType::DSL(dsls) => {
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr
-                            .execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                        let res = expr.execute(&context, &photon_context.functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr
-                            .execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                        let res = expr.execute(&context, &photon_context.functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }
@@ -287,6 +284,7 @@ impl Extractor {
         data: &HttpResponse,
         regex_cache: &RegexCache,
         context: &Context,
+        photon_context: &PhotonContext,
     ) -> Option<Value> {
         if let MatcherType::Status(_) = self.r#type {
             return self.matches_status(data.status_code);
@@ -296,10 +294,7 @@ impl Extractor {
         match &self.r#type {
             MatcherType::DSL(dsls) => dsls
                 .iter()
-                .filter_map(|expr| {
-                    expr.execute(&context, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap())
-                        .ok()
-                })
+                .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
                 .next(),
             MatcherType::Regex(regexes) => regexes
                 .iter()
@@ -333,6 +328,7 @@ impl HttpRequest {
         curl: &mut Easy2<Collector>,
         regex_cache: &RegexCache,
         parent_ctx: Rc<Mutex<Context>>,
+        photon_context: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Vec<MatchResult> {
@@ -344,7 +340,15 @@ impl HttpRequest {
         };
 
         for (idx, req) in self.path.iter().enumerate() {
-            let maybe_resp = req.do_request(base_url, options, curl, &ctx, req_counter, cache);
+            let maybe_resp = req.do_request(
+                base_url,
+                options,
+                curl,
+                &ctx,
+                photon_context,
+                req_counter,
+                cache,
+            );
             if let Some(resp) = maybe_resp {
                 ctx.insert_str(&format!("body_{}", idx + 1), &resp.body);
                 ctx.insert_str("body", &resp.body);
@@ -364,7 +368,9 @@ impl HttpRequest {
                 );
                 for extractor in self.extractors.iter() {
                     if extractor.name.is_some() {
-                        if let Some(res) = extractor.extract(&resp, regex_cache, &ctx) {
+                        if let Some(res) =
+                            extractor.extract(&resp, regex_cache, &ctx, photon_context)
+                        {
                             // A bit clunky to safely mutate the shared parent of the current ctx
                             let tmp = ctx.parent.as_ref().unwrap().clone();
                             let mut locked_parent = tmp.lock().unwrap();
@@ -374,7 +380,8 @@ impl HttpRequest {
                 }
                 for matcher in self.matchers.iter() {
                     // Negative XOR matches
-                    if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx) {
+                    if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_context)
+                    {
                         matches.push(MatchResult {
                             name: matcher.name.clone().unwrap_or("".to_string()),
                             internal: matcher.internal,
@@ -438,6 +445,7 @@ impl Template {
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         parent_ctx: Rc<Mutex<Context>>,
+        photon_ctx: &PhotonContext, // TODO: we can move parent_ctx into here, options as well
         req_counter: &mut u32,
         cache: &mut Cache,
         regex_cache: &RegexCache,
@@ -464,6 +472,7 @@ impl Template {
                 curl,
                 regex_cache,
                 ctx.clone(),
+                photon_ctx,
                 req_counter,
                 cache,
             );

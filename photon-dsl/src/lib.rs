@@ -20,7 +20,6 @@ pub mod dsl;
 pub mod parser;
 
 use dsl::DSLStack;
-use rustc_hash::FxHashMap;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone)]
@@ -28,6 +27,8 @@ pub struct Config {
     pub verbose: bool,
     pub debug: bool,
 }
+
+pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
 
 pub struct DslFunction {
     pub(crate) func: DslFunc,
@@ -39,9 +40,6 @@ impl DslFunction {
         DslFunction { func, params }
     }
 }
-
-pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
-pub static GLOBAL_FUNCTIONS: OnceLock<Mutex<FxHashMap<String, DslFunc>>> = OnceLock::new();
 
 static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
 
@@ -58,6 +56,7 @@ pub fn set_config(config: Config) {
 mod tests {
     use dsl::{Value, VariableContainer};
     use parser::compile_expression;
+    use rustc_hash::FxHashMap;
 
     use crate::parser::compile_expression_validated;
 
@@ -86,8 +85,8 @@ mod tests {
                     let haystack = stack.pop_string()?;
                     stack.push(Value::Boolean(haystack.contains(&needle)));
                     Ok(())
-                })
-            )
+                }),
+            ),
         );
 
         let compiled = compile_expression("contains(\"Hello World!\", \"Hello\")");

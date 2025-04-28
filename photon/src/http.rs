@@ -11,8 +11,7 @@ use curl_sys::CURLOPT_CUSTOMREQUEST;
 use httparse::Status;
 use photon_dsl::{
     dsl::{Value, VariableContainer},
-    parser::compile_expression,
-    GLOBAL_FUNCTIONS,
+    parser::compile_expression_validated,
 };
 use regex::Regex;
 
@@ -21,6 +20,7 @@ use crate::{
     get_config,
     template::{Collector, Context, Method},
     template_executor::ExecutionOptions,
+    PhotonContext,
 };
 
 pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
@@ -42,7 +42,7 @@ pub struct HttpReq {
     pub raw: String,
 }
 
-fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
+fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
     let mut baked = inp.to_string();
     loop {
         let tmp = baked.clone();
@@ -56,9 +56,12 @@ fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
 
         let mut updated = 0;
         for mat in matches.iter() {
-            let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
+            let compiled = compile_expression_validated(
+                &mat.as_str()[2..mat.len() - 2],
+                &photon_ctx.functions,
+            );
             if let Ok(expr) = compiled {
-                let res = expr.execute(&ctx, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(Value::String(ret)) = res {
                     baked = baked.replace(mat.as_str(), &ret);
                     updated += 1;
@@ -227,12 +230,12 @@ fn curl_do_request(
 
 impl HttpReq {
     /// Bakes the request with variables from `ctx`, returning the populated request path.
-    pub fn bake(&self, ctx: &Context) -> Option<String> {
-        bake_ctx(&self.path, ctx)
+    pub fn bake(&self, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
+        bake_ctx(&self.path, ctx, photon_ctx)
     }
 
-    pub fn bake_raw(&self, ctx: &Context) -> Option<String> {
-        bake_ctx(&self.raw, ctx)
+    pub fn bake_raw(&self, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
+        bake_ctx(&self.raw, ctx, photon_ctx)
     }
 
     fn internal_request(
@@ -261,11 +264,12 @@ impl HttpReq {
         &self,
         base_url: &str,
         ctx: &Context,
+        photon_ctx: &PhotonContext,
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let mut raw_data = self.bake_raw(ctx)?;
+        let mut raw_data = self.bake_raw(ctx, photon_ctx)?;
         if let Value::String(hostname) = ctx.get("Hostname").unwrap() {
             if !raw_data.contains(&hostname) {
                 // We don't want to do this request, expected hostname is missing
@@ -346,14 +350,15 @@ impl HttpReq {
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         ctx: &Context,
+        photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Option<HttpResponse> {
         if !self.raw.is_empty() {
-            return self.raw_request(base_url, ctx, options, curl, req_counter);
+            return self.raw_request(base_url, ctx, photon_ctx, options, curl, req_counter);
         }
 
-        let path = self.bake(ctx)?;
+        let path = self.bake(ctx, photon_ctx)?;
         if path.is_empty() || !path.contains(base_url) {
             return None;
         }

@@ -75,16 +75,19 @@ mod tests {
 
     #[test]
     fn basic_functionality() {
-        let mut functions: FxHashMap<String, DslFunc> = FxHashMap::default();
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         functions.insert(
             "contains".into(),
-            Box::new(|stack: &mut DSLStack| {
-                let needle = stack.pop_string()?;
-                let haystack = stack.pop_string()?;
-                stack.push(Value::Boolean(haystack.contains(&needle)));
-                Ok(())
-            }),
+            DslFunction::new(
+                2,
+                Box::new(|stack: &mut DSLStack| {
+                    let needle = stack.pop_string()?;
+                    let haystack = stack.pop_string()?;
+                    stack.push(Value::Boolean(haystack.contains(&needle)));
+                    Ok(())
+                })
+            )
         );
 
         let compiled = compile_expression("contains(\"Hello World!\", \"Hello\")");

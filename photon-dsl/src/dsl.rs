@@ -581,13 +581,12 @@ pub trait VariableContainer {
     fn get(&self, key: &str) -> Option<Value>;
 }
 
-fn execute_bytecode<F, C>(
+fn execute_bytecode<C>(
     compiled: &CompiledExpression,
     variables: &C,
-    functions: &FxHashMap<String, F>,
+    functions: &FxHashMap<String, DslFunction>,
 ) -> Result<Value, ()>
 where
-    F: Fn(&mut DSLStack) -> Result<(), ()>,
     C: VariableContainer,
 {
     let mut stack = DSLStack::new();
@@ -603,7 +602,7 @@ where
                         debug!("Function not found: {:?}", key);
                         return Err(());
                     }
-                    functions.get(key).unwrap()(&mut stack)?;
+                    (functions.get(key).unwrap().func)(&mut stack)?;
                 } else {
                     debug!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());
@@ -696,13 +695,12 @@ where
 }
 
 impl CompiledExpression {
-    pub fn execute<F, C>(
+    pub fn execute<C>(
         &self,
         variables: &C,
-        functions: &FxHashMap<String, F>,
+        functions: &FxHashMap<String, DslFunction>,
     ) -> Result<Value, ()>
     where
-        F: Fn(&mut DSLStack) -> Result<(), ()>,
         C: VariableContainer,
     {
         execute_bytecode(self, variables, functions)

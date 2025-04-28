@@ -4,15 +4,31 @@ use pest::{
     Parser,
 };
 use pest_derive::Parser;
+use rustc_hash::FxHashMap;
 
 use crate::{
-    dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value},
-    get_config,
+    dsl::{
+        compile_bytecode, optimize_expr, validate_expr_funcs, CompiledExpression, Expr, Operator,
+        Value,
+    },
+    get_config, DslFunction,
 };
 
 #[derive(Parser)]
 #[grammar = "dsl.pest"]
 pub struct DSLParser;
+
+pub fn compile_expression_validated(
+    data: &str,
+    functions: &FxHashMap<String, DslFunction>,
+) -> Result<CompiledExpression, ()> {
+    let expr = do_parsing(data)?;
+    if !validate_expr_funcs(&expr, functions) {
+        Err(())
+    } else {
+        Ok(compile_bytecode(expr))
+    }
+}
 
 pub fn compile_expression(data: &str) -> Result<CompiledExpression, ()> {
     Ok(compile_bytecode(do_parsing(data)?))

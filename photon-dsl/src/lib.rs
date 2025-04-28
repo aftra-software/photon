@@ -29,6 +29,17 @@ pub struct Config {
     pub debug: bool,
 }
 
+pub struct DslFunction {
+    pub(crate) func: DslFunc,
+    pub(crate) params: usize,
+}
+
+impl DslFunction {
+    pub fn new(params: usize, func: DslFunc) -> Self {
+        DslFunction { func, params }
+    }
+}
+
 pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
 pub static GLOBAL_FUNCTIONS: OnceLock<Mutex<FxHashMap<String, DslFunc>>> = OnceLock::new();
 
@@ -47,6 +58,8 @@ pub fn set_config(config: Config) {
 mod tests {
     use dsl::{Value, VariableContainer};
     use parser::compile_expression;
+
+    use crate::parser::compile_expression_validated;
 
     use super::*;
 
@@ -80,5 +93,27 @@ mod tests {
         let res = compiled.unwrap().execute(&NoVariables, &functions);
         assert!(res.is_ok());
         assert!(res.unwrap() == Value::Boolean(true));
+    }
+
+    #[test]
+    fn too_many_arguments() {
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+
+        functions.insert(
+            "contains".into(),
+            DslFunction::new(
+                2,
+                Box::new(|stack: &mut DSLStack| {
+                    let needle = stack.pop_string()?;
+                    let haystack = stack.pop_string()?;
+                    stack.push(Value::Boolean(haystack.contains(&needle)));
+                    Ok(())
+                }),
+            ),
+        );
+
+        // This expression should fail to compile, since the `contains` function takes only 2 parameters
+        let compiled = compile_expression_validated("contains(\"Hello World!\", \"Hello\", \"Hi\")", &functions);
+        assert!(compiled.is_err());
     }
 }

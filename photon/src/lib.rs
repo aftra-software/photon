@@ -37,6 +37,16 @@ pub struct Config {
     pub debug: bool,
 }
 
+pub struct PhotonContext {
+    functions: FxHashMap<String, DslFunc>,
+}
+
+impl PhotonContext {
+    pub fn add_function(&mut self, name: &str, func: DslFunc) {
+        self.functions.insert(String::from(name), func);
+    }
+}
+
 lazy_static::lazy_static! {
     static ref CONFIG: Mutex<Config> = {
         Mutex::from(Config {

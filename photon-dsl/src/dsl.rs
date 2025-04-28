@@ -1,7 +1,7 @@
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::get_config;
+use crate::{get_config, DslFunction};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -240,6 +240,34 @@ fn map_op(op: Operator) -> OPCode {
     }
 }
 
+// Validate functions inside the expression
+// makes sure that function argument count is correct.
+pub fn validate_expr_funcs(expr: &Expr, functions: &FxHashMap<String, DslFunction>) -> bool {
+    match expr {
+        Expr::Function(name, variables) => {
+            let func_args = if let Some(func) = functions.get(name) {
+                func.params
+            } else {
+                return false;
+            };
+
+            variables.len() == func_args
+        }
+        Expr::Operator(left, _, right) => {
+            validate_expr_funcs(left, functions) && validate_expr_funcs(right, functions)
+        }
+        Expr::Constant(_) => true,
+        Expr::List(exprs) => exprs.iter().all(|e| validate_expr_funcs(e, functions)),
+        Expr::Ternary(left, middle, right) => {
+            validate_expr_funcs(left, functions)
+                && validate_expr_funcs(middle, functions)
+                && validate_expr_funcs(right, functions)
+        }
+        Expr::Variable(_) => true,
+        Expr::Prefix(_, expr) => validate_expr_funcs(expr, functions),
+    }
+}
+
 pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
     match expr {
         Expr::Operator(left, op, right) => {
@@ -295,7 +323,10 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             let op = match value {
                 Value::String(_) => OPCode::LoadConstStr,
                 Value::Int(_) => OPCode::LoadConstInt,
-                _ => unreachable!("not possible"),
+                other => unreachable!(
+                    "not possible, loading {:?} into constant inside String/Int case?",
+                    other
+                ),
             };
             CompiledExpression(vec![Bytecode::Instr(op), Bytecode::Value(value)])
         }

@@ -113,7 +113,10 @@ mod tests {
         );
 
         // This expression should fail to compile, since the `contains` function takes only 2 parameters
-        let compiled = compile_expression_validated("contains(\"Hello World!\", \"Hello\", \"Hi\")", &functions);
+        let compiled = compile_expression_validated(
+            "contains(\"Hello World!\", \"Hello\", \"Hi\")",
+            &functions,
+        );
         assert!(compiled.is_err());
     }
 }

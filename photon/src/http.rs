@@ -137,6 +137,9 @@ fn curl_do_request(
 
     // Manually find and set CA certificates, solves a lot of issues with statically linked libcurl.
 
+    // TODO: I don't think any of the ca cert stuff is required since we just completely ignore any verification at this point
+    // Remove?
+
     // TODO: Do additional validation to make sure we don't run into the case where
     // CURL can find the certs but openssl_probe can't.
     if path.starts_with("https") {

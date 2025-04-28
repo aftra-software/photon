@@ -1,8 +1,8 @@
 use std::{sync::Mutex, time::Instant};
 
 use clap::Parser;
-use photon::template_executor::{ExecutionOptions, ScanError};
 use photon::set_config;
+use photon::template_executor::{ExecutionOptions, ScanError};
 use photon::{template_executor::TemplateExecutor, template_loader::TemplateLoader};
 
 #[derive(Parser, Debug)]

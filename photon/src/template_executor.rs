@@ -61,7 +61,7 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
-    ctx: Rc<Mutex<Context>>,
+    ctx: Rc<Mutex<Context>>, // TODO: Mutex can likely just be a RefCell instead, unless multithreading using the same executor is really required.
     photon_ctx: PhotonContext,
     total_reqs: u32,
     cache: Cache,

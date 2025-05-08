@@ -1,7 +1,7 @@
 use core::str;
 use std::{
     collections::HashSet,
-    sync::{Mutex, OnceLock},
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -23,7 +23,13 @@ use crate::{
     PhotonContext,
 };
 
-pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
+pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();
+
+pub fn get_bracket_pattern() -> &'static Regex {
+    BRACKET_PATTERN.get_or_init(|| {
+        Regex::new("\\{\\{([^{}]*)}}").unwrap()
+    })
+}
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct HttpResponse {
@@ -46,11 +52,7 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
     let mut baked = inp.to_string();
     loop {
         let tmp = baked.clone();
-        let matches: Vec<regex::Match<'_>> = BRACKET_PATTERN
-            .get()
-            .unwrap()
-            .lock()
-            .unwrap()
+        let matches: Vec<regex::Match<'_>> = get_bracket_pattern()
             .find_iter(tmp.as_str())
             .collect();
 

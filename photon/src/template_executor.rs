@@ -4,13 +4,11 @@ use std::{rc::Rc, sync::Mutex};
 
 use curl::easy::Easy2;
 use rand::distributions::{Alphanumeric, DistString};
-use regex::Regex;
 use rustc_hash::FxHashMap;
 use url::Url;
 
 use crate::{
     cache::{Cache, RegexCache},
-    http::BRACKET_PATTERN,
     init_functions,
     template::{Collector, Context, Template},
     template_loader::TemplateLoader,
@@ -72,12 +70,6 @@ where
     continue_predicate: Option<C>,
 }
 
-// TODO: This should be refactored sometime, no reason why it should be initialized here
-// But we need to initialize it in some place :p
-fn init_bracket_regex() {
-    let _ = BRACKET_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
-}
-
 impl<T, K, C> TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
@@ -85,7 +77,6 @@ where
     C: Fn() -> bool,
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
-        init_bracket_regex();
         Self {
             ctx: Rc::from(Mutex::from(Context {
                 variables: FxHashMap::default(),
@@ -107,7 +98,6 @@ where
 
     // Usess more memory than `from` since it copies the TemplateLoader
     pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
-        init_bracket_regex();
         Self {
             ctx: Rc::from(Mutex::from(Context {
                 variables: FxHashMap::default(),

@@ -10,7 +10,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 use crate::{
     cache::{Cache, CacheKey, RegexCache},
     get_config,
-    http::{HttpReq, BRACKET_PATTERN},
+    http::{get_bracket_pattern, HttpReq},
     template::{
         Condition, Extractor, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart,
         Severity, Template,
@@ -510,7 +510,6 @@ fn parse_variables(yaml: &Yaml) -> Vec<(String, Value)> {
 
     let hash = yaml.as_hash().unwrap();
 
-    let regex_pattern = BRACKET_PATTERN.get().unwrap().lock().unwrap();
     for (k, v) in hash {
         if k.is_array() || v.is_array() {
             // TODO: Array support required in DSL
@@ -518,7 +517,7 @@ fn parse_variables(yaml: &Yaml) -> Vec<(String, Value)> {
         }
         let key = k.as_str().unwrap();
         let value = v.as_str().unwrap();
-        if regex_pattern.is_match(value) {
+        if get_bracket_pattern().is_match(value) {
             // TODO: Store compiled expression for running right before template is executed
         } else {
             variables.push((key.to_string(), Value::String(value.to_string())));

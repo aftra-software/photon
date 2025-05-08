@@ -462,10 +462,20 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             Ok(())
         }
         OPCode::Add => {
-            let b = stack.pop_int()?;
-            let a = stack.pop_int()?;
-            stack.push(Value::Int(a + b));
-            Ok(())
+            let b = stack.pop()?;
+            match b {
+                Value::Int(b) => {
+                    let a = stack.pop_int()?;
+                    stack.push(Value::Int(a + b));
+                    Ok(())
+                },
+                Value::String(b) => {
+                    let a = stack.pop_string()?;
+                    stack.push(Value::String(format!("{}{}", a, b)));
+                    Ok(())
+                }
+                _ => Err(())
+            }
         }
         OPCode::Mul => {
             let b = stack.pop_int()?;

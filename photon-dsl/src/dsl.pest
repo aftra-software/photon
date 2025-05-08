@@ -9,8 +9,9 @@ ident = @{ ("_" | "." | alpha) ~ ("_" | "." | alpha | digit)* }
 predefined = _{ "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
 escape     = _{ "\\" ~ predefined }
 raw_string = _{ (!("\\" | "\"" | "'") ~ ANY)+ }
-string     =  { (raw_string | escape)* }
-_string    = _{ ("'" ~ string ~ "'") | ("\"" ~ string ~ "\"") }
+string =  { (raw_string | escape)* }
+// Compound atomic so pest doesn't eat the first and last whitespace inside a string
+_string     = ${ ("'" ~ string ~ "'") | ("\"" ~ string ~ "\"") }
 eoi        = _{ !ANY }
 
 init       = _{ SOI ~ primary ~ eoi }

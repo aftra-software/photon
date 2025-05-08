@@ -52,20 +52,20 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
     let mut baked = inp.to_string();
     loop {
         let tmp = baked.clone();
-        let matches: Vec<regex::Match<'_>> = get_bracket_pattern()
-            .find_iter(tmp.as_str())
+        let matches: Vec<_> = get_bracket_pattern()
+            .captures_iter(tmp.as_str())
             .collect();
 
         let mut updated = 0;
         for mat in matches.iter() {
             let compiled = compile_expression_validated(
-                &mat.as_str()[2..mat.len() - 2],
+                &mat.get(1).unwrap().as_str(),
                 &photon_ctx.functions,
             );
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(Value::String(ret)) = res {
-                    baked = baked.replace(mat.as_str(), &ret);
+                    baked = baked.replace(mat.get(0).unwrap().as_str(), &ret);
                     updated += 1;
                 }
             }
@@ -75,7 +75,7 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
             if !matches.is_empty() {
                 let unique = matches
                     .iter()
-                    .map(|m| m.as_str().to_string())
+                    .map(|m| m.get(1).unwrap().as_str().to_string())
                     .collect::<HashSet<String>>();
                 verbose!(
                     "Skipping request, {} missing parameters: [{}]",

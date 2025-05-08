@@ -74,6 +74,7 @@ mod tests {
 
     #[test]
     fn basic_functionality() {
+        set_config(Config { verbose: true, debug: true });
         let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         functions.insert(
@@ -95,6 +96,14 @@ mod tests {
         let res = compiled.unwrap().execute(&NoVariables, &functions);
         assert!(res.is_ok());
         assert!(res.unwrap() == Value::Boolean(true));
+
+        let compiled = compile_expression_validated("\"hello\" + \" world\"", &functions);
+        assert!(compiled.is_ok());
+
+        let res = compiled.unwrap().execute(&NoVariables, &functions);
+        assert!(res.is_ok());
+        println!("{:?}", res);
+        assert!(res.unwrap() == Value::String(String::from("hello world")));
     }
 
     #[test]

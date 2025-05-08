@@ -609,11 +609,13 @@ where
             Bytecode::Instr(OPCode::CallFunc) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    if !functions.contains_key(key) {
-                        debug!("Function not found: {:?}", key);
-                        return Err(());
+                    match functions.get(key) {
+                        Some(f) => (f.func)(&mut stack)?,
+                        None => {
+                            debug!("Function not found: {:?}", key);
+                            return Err(());
+                        }
                     }
-                    (functions.get(key).unwrap().func)(&mut stack)?;
                 } else {
                     debug!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());

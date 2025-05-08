@@ -9,8 +9,10 @@ use url::Url;
 
 use crate::{
     cache::{Cache, RegexCache},
+    init_functions,
     template::{Collector, Context, Template},
     template_loader::TemplateLoader,
+    PhotonContext,
 };
 
 pub struct ExecutionOptions {
@@ -57,7 +59,8 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
-    ctx: Rc<Mutex<Context>>,
+    ctx: Rc<Mutex<Context>>, // TODO: Mutex can likely just be a RefCell instead, unless multithreading using the same executor is really required.
+    photon_ctx: PhotonContext,
     total_reqs: u32,
     cache: Cache,
     regex_cache: RegexCache,
@@ -79,6 +82,9 @@ where
                 variables: FxHashMap::default(),
                 parent: None,
             })),
+            photon_ctx: PhotonContext {
+                functions: init_functions(),
+            },
             total_reqs: 0,
             templates: templ_loader.loaded_templates,
             cache: templ_loader.cache,
@@ -97,6 +103,9 @@ where
                 variables: FxHashMap::default(),
                 parent: None,
             })),
+            photon_ctx: PhotonContext {
+                functions: init_functions(),
+            },
             total_reqs: 0,
             templates: templ_loader.loaded_templates.clone(),
             cache: templ_loader.cache.clone(),
@@ -180,6 +189,7 @@ where
                 &self.options,
                 &mut curl,
                 self.ctx.clone(), // Cheap reference clone
+                &self.photon_ctx,
                 &mut self.total_reqs,
                 &mut self.cache,
                 &self.regex_cache,

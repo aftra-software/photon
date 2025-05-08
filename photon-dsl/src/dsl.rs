@@ -1,7 +1,7 @@
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::get_config;
+use crate::{get_config, DslFunction};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -240,6 +240,34 @@ fn map_op(op: Operator) -> OPCode {
     }
 }
 
+// Validate functions inside the expression
+// makes sure that function argument count is correct.
+pub fn validate_expr_funcs(expr: &Expr, functions: &FxHashMap<String, DslFunction>) -> bool {
+    match expr {
+        Expr::Function(name, variables) => {
+            let func_args = if let Some(func) = functions.get(name) {
+                func.params
+            } else {
+                return false;
+            };
+
+            variables.len() == func_args
+        }
+        Expr::Operator(left, _, right) => {
+            validate_expr_funcs(left, functions) && validate_expr_funcs(right, functions)
+        }
+        Expr::Constant(_) => true,
+        Expr::List(exprs) => exprs.iter().all(|e| validate_expr_funcs(e, functions)),
+        Expr::Ternary(left, middle, right) => {
+            validate_expr_funcs(left, functions)
+                && validate_expr_funcs(middle, functions)
+                && validate_expr_funcs(right, functions)
+        }
+        Expr::Variable(_) => true,
+        Expr::Prefix(_, expr) => validate_expr_funcs(expr, functions),
+    }
+}
+
 pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
     match expr {
         Expr::Operator(left, op, right) => {
@@ -295,7 +323,10 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
             let op = match value {
                 Value::String(_) => OPCode::LoadConstStr,
                 Value::Int(_) => OPCode::LoadConstInt,
-                _ => unreachable!("not possible"),
+                other => unreachable!(
+                    "not possible, loading {:?} into constant inside String/Int case?",
+                    other
+                ),
             };
             CompiledExpression(vec![Bytecode::Instr(op), Bytecode::Value(value)])
         }
@@ -362,6 +393,10 @@ pub struct DSLStack {
 impl DSLStack {
     fn new() -> Self {
         DSLStack { inner: Vec::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 
     pub fn push(&mut self, val: Value) {
@@ -431,10 +466,21 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             Ok(())
         }
         OPCode::Add => {
-            let b = stack.pop_int()?;
-            let a = stack.pop_int()?;
-            stack.push(Value::Int(a + b));
-            Ok(())
+            let b = stack.pop()?;
+            // Valid to use + on 2 strings or 2 ints
+            match b {
+                Value::Int(b) => {
+                    let a = stack.pop_int()?;
+                    stack.push(Value::Int(a + b));
+                    Ok(())
+                }
+                Value::String(b) => {
+                    let a = stack.pop_string()?;
+                    stack.push(Value::String(format!("{}{}", a, b)));
+                    Ok(())
+                }
+                _ => Err(()),
+            }
         }
         OPCode::Mul => {
             let b = stack.pop_int()?;
@@ -550,13 +596,12 @@ pub trait VariableContainer {
     fn get(&self, key: &str) -> Option<Value>;
 }
 
-fn execute_bytecode<F, C>(
+fn execute_bytecode<C>(
     compiled: &CompiledExpression,
     variables: &C,
-    functions: &FxHashMap<String, F>,
+    functions: &FxHashMap<String, DslFunction>,
 ) -> Result<Value, ()>
 where
-    F: Fn(&mut DSLStack) -> Result<(), ()>,
     C: VariableContainer,
 {
     let mut stack = DSLStack::new();
@@ -568,11 +613,27 @@ where
             Bytecode::Instr(OPCode::CallFunc) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    if !functions.contains_key(key) {
-                        debug!("Function not found: {:?}", key);
-                        return Err(());
+                    match functions.get(key) {
+                        Some(f) => {
+                            // TODO: Using a DslStackView-type approach might be better when we add richer errors.
+                            // see https://github.com/aftra-software/photon/pull/15#discussion_r2071749326
+                            let stack_len = stack.len();
+
+                            let ret = (f.func)(&mut stack)?;
+
+                            // Verify that the function popped exactly f.params values off the stack
+                            if stack.len() != stack_len - f.params {
+                                debug!("Function {} popped {} values off the stack, expected {} popped.", key, stack_len - stack.len(), f.params);
+                                return Err(());
+                            }
+
+                            stack.push(ret);
+                        }
+                        None => {
+                            debug!("Function not found: {:?}", key);
+                            return Err(());
+                        }
                     }
-                    functions.get(key).unwrap()(&mut stack)?;
                 } else {
                     debug!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
                     return Err(());
@@ -665,13 +726,12 @@ where
 }
 
 impl CompiledExpression {
-    pub fn execute<F, C>(
+    pub fn execute<C>(
         &self,
         variables: &C,
-        functions: &FxHashMap<String, F>,
+        functions: &FxHashMap<String, DslFunction>,
     ) -> Result<Value, ()>
     where
-        F: Fn(&mut DSLStack) -> Result<(), ()>,
         C: VariableContainer,
     {
         execute_bytecode(self, variables, functions)

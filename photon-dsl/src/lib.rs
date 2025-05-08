@@ -19,8 +19,7 @@ macro_rules! verbose {
 pub mod dsl;
 pub mod parser;
 
-use dsl::DSLStack;
-use rustc_hash::FxHashMap;
+use dsl::{DSLStack, Value};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone)]
@@ -29,8 +28,18 @@ pub struct Config {
     pub debug: bool,
 }
 
-pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
-pub static GLOBAL_FUNCTIONS: OnceLock<Mutex<FxHashMap<String, DslFunc>>> = OnceLock::new();
+pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<Value, ()> + Send + Sync>;
+
+pub struct DslFunction {
+    pub(crate) func: DslFunc,
+    pub(crate) params: usize,
+}
+
+impl DslFunction {
+    pub fn new(params: usize, func: DslFunc) -> Self {
+        DslFunction { func, params }
+    }
+}
 
 static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
 
@@ -47,6 +56,9 @@ pub fn set_config(config: Config) {
 mod tests {
     use dsl::{Value, VariableContainer};
     use parser::compile_expression;
+    use rustc_hash::FxHashMap;
+
+    use crate::parser::compile_expression_validated;
 
     use super::*;
 
@@ -62,16 +74,22 @@ mod tests {
 
     #[test]
     fn basic_functionality() {
-        let mut functions: FxHashMap<String, DslFunc> = FxHashMap::default();
+        set_config(Config {
+            verbose: true,
+            debug: true,
+        });
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         functions.insert(
             "contains".into(),
-            Box::new(|stack: &mut DSLStack| {
-                let needle = stack.pop_string()?;
-                let haystack = stack.pop_string()?;
-                stack.push(Value::Boolean(haystack.contains(&needle)));
-                Ok(())
-            }),
+            DslFunction::new(
+                2,
+                Box::new(|stack: &mut DSLStack| {
+                    let needle = stack.pop_string()?;
+                    let haystack = stack.pop_string()?;
+                    Ok(Value::Boolean(haystack.contains(&needle)))
+                }),
+            ),
         );
 
         let compiled = compile_expression("contains(\"Hello World!\", \"Hello\")");
@@ -80,5 +98,37 @@ mod tests {
         let res = compiled.unwrap().execute(&NoVariables, &functions);
         assert!(res.is_ok());
         assert!(res.unwrap() == Value::Boolean(true));
+
+        let compiled = compile_expression_validated("\"hello\" + \" world\"", &functions);
+        assert!(compiled.is_ok());
+
+        let res = compiled.unwrap().execute(&NoVariables, &functions);
+        assert!(res.is_ok());
+        println!("{:?}", res);
+        assert!(res.unwrap() == Value::String(String::from("hello world")));
+    }
+
+    #[test]
+    fn too_many_arguments() {
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+
+        functions.insert(
+            "contains".into(),
+            DslFunction::new(
+                2,
+                Box::new(|stack: &mut DSLStack| {
+                    let needle = stack.pop_string()?;
+                    let haystack = stack.pop_string()?;
+                    Ok(Value::Boolean(haystack.contains(&needle)))
+                }),
+            ),
+        );
+
+        // This expression should fail to compile, since the `contains` function takes only 2 parameters
+        let compiled = compile_expression_validated(
+            "contains(\"Hello World!\", \"Hello\", \"Hi\")",
+            &functions,
+        );
+        assert!(compiled.is_err());
     }
 }

@@ -22,11 +22,10 @@ pub mod template_loader;
 
 use std::sync::Mutex;
 
-use http::BRACKET_PATTERN;
 use md5::{Digest, Md5};
 use photon_dsl::{
     dsl::{DSLStack, Value},
-    DslFunc, GLOBAL_FUNCTIONS,
+    DslFunction,
 };
 use regex::Regex;
 use rustc_hash::FxHashMap;
@@ -35,6 +34,16 @@ use rustc_hash::FxHashMap;
 pub struct Config {
     pub verbose: bool,
     pub debug: bool,
+}
+
+pub struct PhotonContext {
+    functions: FxHashMap<String, DslFunction>,
+}
+
+impl PhotonContext {
+    pub fn add_function(&mut self, name: &str, func: DslFunction) {
+        self.functions.insert(String::from(name), func);
+    }
 }
 
 lazy_static::lazy_static! {
@@ -67,93 +76,87 @@ pub fn set_config(config: Config) {
     *CONFIG.lock().unwrap() = config;
 }
 
-pub fn add_global_function(name: &str, f: DslFunc) {
-    GLOBAL_FUNCTIONS
-        .get()
-        .unwrap()
-        .lock()
-        .unwrap()
-        .insert(name.into(), f);
-}
-
-fn init_functions() -> FxHashMap<String, DslFunc> {
-    let mut functions: FxHashMap<String, DslFunc> = FxHashMap::default();
+fn init_functions() -> FxHashMap<String, DslFunction> {
+    let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
     functions.insert(
         "md5".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let inp = stack.pop_string()?;
-            let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-            stack.push(Value::String(hash));
-            Ok(())
-        }),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let hash = base16ct::lower::encode_string(&Md5::digest(inp));
+                Ok(Value::String(hash))
+            }),
+        ),
     );
     functions.insert(
         "regex".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let inp = stack.pop_string()?;
-            let patt = stack.pop_string()?;
-            let reg = Regex::new(&patt).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
-            stack.push(Value::Boolean(reg.is_match(&inp)));
-            Ok(())
-        }),
+        DslFunction::new(
+            2,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let patt = stack.pop_string()?;
+                let reg = Regex::new(&patt).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
+                Ok(Value::Boolean(reg.is_match(&inp)))
+            }),
+        ),
     );
     functions.insert(
         "contains".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let needle = stack.pop_string()?;
-            let haystack = stack.pop_string()?;
-            stack.push(Value::Boolean(haystack.contains(&needle)));
-            Ok(())
-        }),
+        DslFunction::new(
+            2,
+            Box::new(|stack: &mut DSLStack| {
+                let needle = stack.pop_string()?;
+                let haystack = stack.pop_string()?;
+                Ok(Value::Boolean(haystack.contains(&needle)))
+            }),
+        ),
     );
     functions.insert(
         "tolower".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let inp = stack.pop_string()?;
-            stack.push(Value::String(inp.to_lowercase()));
-            Ok(())
-        }),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                Ok(Value::String(inp.to_lowercase()))
+            }),
+        ),
     );
     functions.insert(
         "to_lower".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let inp = stack.pop_string()?;
-            stack.push(Value::String(inp.to_lowercase()));
-            Ok(())
-        }),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                Ok(Value::String(inp.to_lowercase()))
+            }),
+        ),
     );
     functions.insert(
         "len".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let inp = stack.pop_string()?;
-            stack.push(Value::Int(inp.len() as i64));
-            Ok(())
-        }),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                Ok(Value::Int(inp.len() as i64))
+            }),
+        ),
     );
     functions.insert(
         "hex_decode".into(),
-        Box::new(|stack: &mut DSLStack| {
-            let inp = stack.pop_string()?;
-            let decoded_vec = base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
-            let decoded_str = String::from_utf8_lossy(&decoded_vec);
-            stack.push(Value::String(String::from(decoded_str)));
-            Ok(())
-        }),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let decoded_vec = base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
+                let decoded_str = String::from_utf8_lossy(&decoded_vec);
+                Ok(Value::String(String::from(decoded_str)))
+            }),
+        ),
     );
 
     functions
-}
-
-pub fn initialize() {
-    if GLOBAL_FUNCTIONS.get().is_some() {
-        return; // Don't waste time
-    }
-
-    let _ = BRACKET_PATTERN.set(Mutex::from(Regex::new("\\{\\{[^{}]*}}").unwrap()));
-    let functions = init_functions();
-
-    GLOBAL_FUNCTIONS.set(Mutex::from(functions)).ok().unwrap();
 }
 
 #[cfg(test)]
@@ -173,7 +176,7 @@ mod tests {
         }
     }
 
-    fn test_expression(fns: &FxHashMap<String, DslFunc>, expr: &str) -> bool {
+    fn test_expression(fns: &FxHashMap<String, DslFunction>, expr: &str) -> bool {
         let compiled = compile_expression(expr);
         assert!(compiled.is_ok());
 
@@ -188,7 +191,7 @@ mod tests {
             verbose: true,
             debug: true,
         });
-        let functions: FxHashMap<String, DslFunc> = init_functions();
+        let functions: FxHashMap<String, DslFunction> = init_functions();
 
         assert!(test_expression(
             &functions,

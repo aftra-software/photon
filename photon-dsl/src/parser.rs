@@ -4,15 +4,31 @@ use pest::{
     Parser,
 };
 use pest_derive::Parser;
+use rustc_hash::FxHashMap;
 
 use crate::{
-    dsl::{compile_bytecode, optimize_expr, CompiledExpression, Expr, Operator, Value},
-    get_config,
+    dsl::{
+        compile_bytecode, optimize_expr, validate_expr_funcs, CompiledExpression, Expr, Operator,
+        Value,
+    },
+    get_config, DslFunction,
 };
 
 #[derive(Parser)]
 #[grammar = "dsl.pest"]
 pub struct DSLParser;
+
+pub fn compile_expression_validated(
+    data: &str,
+    functions: &FxHashMap<String, DslFunction>,
+) -> Result<CompiledExpression, ()> {
+    let expr = do_parsing(data)?;
+    if !validate_expr_funcs(&expr, functions) {
+        Err(())
+    } else {
+        Ok(compile_bytecode(expr))
+    }
+}
 
 pub fn compile_expression(data: &str) -> Result<CompiledExpression, ()> {
     Ok(compile_bytecode(do_parsing(data)?))
@@ -81,7 +97,7 @@ fn unescape(s: &str) -> Result<String, ()> {
 
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
     match primary.as_rule() {
-        Rule::expr | Rule::clause => parse_expr(primary.into_inner()),
+        Rule::expr | Rule::clause | Rule::_string => parse_expr(primary.into_inner()),
         Rule::string => Expr::Constant(Value::String(unescape(primary.as_str()).unwrap())),
         Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
         Rule::variable => Expr::Variable(primary.as_str().to_string()),

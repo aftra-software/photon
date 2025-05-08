@@ -1,7 +1,7 @@
 use core::str;
 use std::{
     collections::HashSet,
-    sync::{Mutex, OnceLock},
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -11,8 +11,7 @@ use curl_sys::CURLOPT_CUSTOMREQUEST;
 use httparse::Status;
 use photon_dsl::{
     dsl::{Value, VariableContainer},
-    parser::compile_expression,
-    GLOBAL_FUNCTIONS,
+    parser::compile_expression_validated,
 };
 use regex::Regex;
 
@@ -21,9 +20,14 @@ use crate::{
     get_config,
     template::{Collector, Context, Method},
     template_executor::ExecutionOptions,
+    PhotonContext,
 };
 
-pub static BRACKET_PATTERN: OnceLock<Mutex<Regex>> = OnceLock::new();
+pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();
+
+pub fn get_bracket_pattern() -> &'static Regex {
+    BRACKET_PATTERN.get_or_init(|| Regex::new("\\{\\{([^{}]*)}}").unwrap())
+}
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct HttpResponse {
@@ -42,25 +46,20 @@ pub struct HttpReq {
     pub raw: String,
 }
 
-fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
+fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
     let mut baked = inp.to_string();
     loop {
         let tmp = baked.clone();
-        let matches: Vec<regex::Match<'_>> = BRACKET_PATTERN
-            .get()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .find_iter(tmp.as_str())
-            .collect();
+        let matches: Vec<_> = get_bracket_pattern().captures_iter(tmp.as_str()).collect();
 
         let mut updated = 0;
         for mat in matches.iter() {
-            let compiled = compile_expression(&mat.as_str()[2..mat.len() - 2]);
+            let compiled =
+                compile_expression_validated(&mat.get(1).unwrap().as_str(), &photon_ctx.functions);
             if let Ok(expr) = compiled {
-                let res = expr.execute(&ctx, &GLOBAL_FUNCTIONS.get().unwrap().lock().unwrap());
+                let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(Value::String(ret)) = res {
-                    baked = baked.replace(mat.as_str(), &ret);
+                    baked = baked.replace(mat.get(0).unwrap().as_str(), &ret);
                     updated += 1;
                 }
             }
@@ -70,7 +69,7 @@ fn bake_ctx(inp: &str, ctx: &Context) -> Option<String> {
             if !matches.is_empty() {
                 let unique = matches
                     .iter()
-                    .map(|m| m.as_str().to_string())
+                    .map(|m| m.get(1).unwrap().as_str().to_string())
                     .collect::<HashSet<String>>();
                 verbose!(
                     "Skipping request, {} missing parameters: [{}]",
@@ -134,6 +133,9 @@ fn curl_do_request(
 
     // Manually find and set CA certificates, solves a lot of issues with statically linked libcurl.
 
+    // TODO: I don't think any of the ca cert stuff is required since we just completely ignore any verification at this point
+    // Remove?
+
     // TODO: Do additional validation to make sure we don't run into the case where
     // CURL can find the certs but openssl_probe can't.
     if path.starts_with("https") {
@@ -151,6 +153,7 @@ fn curl_do_request(
 
     // Setup CURL context for this request
     curl.path_as_is(true).unwrap();
+    //curl.follow_location(true).unwrap(); // Follow redirects, TODO: make configurable, AFAIK templates can change this opt
     curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
     curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
@@ -226,12 +229,12 @@ fn curl_do_request(
 
 impl HttpReq {
     /// Bakes the request with variables from `ctx`, returning the populated request path.
-    pub fn bake(&self, ctx: &Context) -> Option<String> {
-        bake_ctx(&self.path, ctx)
+    pub fn bake(&self, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
+        bake_ctx(&self.path, ctx, photon_ctx)
     }
 
-    pub fn bake_raw(&self, ctx: &Context) -> Option<String> {
-        bake_ctx(&self.raw, ctx)
+    pub fn bake_raw(&self, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
+        bake_ctx(&self.raw, ctx, photon_ctx)
     }
 
     fn internal_request(
@@ -260,11 +263,12 @@ impl HttpReq {
         &self,
         base_url: &str,
         ctx: &Context,
+        photon_ctx: &PhotonContext,
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let mut raw_data = self.bake_raw(ctx)?;
+        let mut raw_data = self.bake_raw(ctx, photon_ctx)?;
         if let Value::String(hostname) = ctx.get("Hostname").unwrap() {
             if !raw_data.contains(&hostname) {
                 // We don't want to do this request, expected hostname is missing
@@ -345,14 +349,15 @@ impl HttpReq {
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         ctx: &Context,
+        photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Option<HttpResponse> {
         if !self.raw.is_empty() {
-            return self.raw_request(base_url, ctx, options, curl, req_counter);
+            return self.raw_request(base_url, ctx, photon_ctx, options, curl, req_counter);
         }
 
-        let path = self.bake(ctx)?;
+        let path = self.bake(ctx, photon_ctx)?;
         if path.is_empty() || !path.contains(base_url) {
             return None;
         }

@@ -74,7 +74,10 @@ mod tests {
 
     #[test]
     fn basic_functionality() {
-        set_config(Config { verbose: true, debug: true });
+        set_config(Config {
+            verbose: true,
+            debug: true,
+        });
         let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         functions.insert(

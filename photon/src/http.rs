@@ -26,9 +26,7 @@ use crate::{
 pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 pub fn get_bracket_pattern() -> &'static Regex {
-    BRACKET_PATTERN.get_or_init(|| {
-        Regex::new("\\{\\{([^{}]*)}}").unwrap()
-    })
+    BRACKET_PATTERN.get_or_init(|| Regex::new("\\{\\{([^{}]*)}}").unwrap())
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -52,16 +50,12 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
     let mut baked = inp.to_string();
     loop {
         let tmp = baked.clone();
-        let matches: Vec<_> = get_bracket_pattern()
-            .captures_iter(tmp.as_str())
-            .collect();
+        let matches: Vec<_> = get_bracket_pattern().captures_iter(tmp.as_str()).collect();
 
         let mut updated = 0;
         for mat in matches.iter() {
-            let compiled = compile_expression_validated(
-                &mat.get(1).unwrap().as_str(),
-                &photon_ctx.functions,
-            );
+            let compiled =
+                compile_expression_validated(&mat.get(1).unwrap().as_str(), &photon_ctx.functions);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(Value::String(ret)) = res {

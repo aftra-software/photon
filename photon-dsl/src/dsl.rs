@@ -468,13 +468,13 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
                     let a = stack.pop_int()?;
                     stack.push(Value::Int(a + b));
                     Ok(())
-                },
+                }
                 Value::String(b) => {
                     let a = stack.pop_string()?;
                     stack.push(Value::String(format!("{}{}", a, b)));
                     Ok(())
                 }
-                _ => Err(())
+                _ => Err(()),
             }
         }
         OPCode::Mul => {

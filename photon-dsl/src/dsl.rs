@@ -395,6 +395,10 @@ impl DSLStack {
         DSLStack { inner: Vec::new() }
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
     pub fn push(&mut self, val: Value) {
         self.inner.push(val);
     }
@@ -610,7 +614,21 @@ where
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
                     match functions.get(key) {
-                        Some(f) => (f.func)(&mut stack)?,
+                        Some(f) => {
+                            // TODO: Using a DslStackView-type approach might be better when we add richer errors.
+                            // see https://github.com/aftra-software/photon/pull/15#discussion_r2071749326
+                            let stack_len = stack.len();
+
+                            let ret = (f.func)(&mut stack)?;
+
+                            // Verify that the function popped exactly f.params values off the stack
+                            if stack.len() != stack_len - f.params {
+                                debug!("Function {} popped {} values off the stack, expected {} popped.", key, stack_len - stack.len(), f.params);
+                                return Err(());
+                            }
+
+                            stack.push(ret);
+                        }
                         None => {
                             debug!("Function not found: {:?}", key);
                             return Err(());

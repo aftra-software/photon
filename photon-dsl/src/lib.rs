@@ -19,7 +19,7 @@ macro_rules! verbose {
 pub mod dsl;
 pub mod parser;
 
-use dsl::DSLStack;
+use dsl::{DSLStack, Value};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone)]
@@ -28,7 +28,7 @@ pub struct Config {
     pub debug: bool,
 }
 
-pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<(), ()> + Send + Sync>;
+pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<Value, ()> + Send + Sync>;
 
 pub struct DslFunction {
     pub(crate) func: DslFunc,
@@ -87,8 +87,7 @@ mod tests {
                 Box::new(|stack: &mut DSLStack| {
                     let needle = stack.pop_string()?;
                     let haystack = stack.pop_string()?;
-                    stack.push(Value::Boolean(haystack.contains(&needle)));
-                    Ok(())
+                    Ok(Value::Boolean(haystack.contains(&needle)))
                 }),
             ),
         );
@@ -120,8 +119,7 @@ mod tests {
                 Box::new(|stack: &mut DSLStack| {
                     let needle = stack.pop_string()?;
                     let haystack = stack.pop_string()?;
-                    stack.push(Value::Boolean(haystack.contains(&needle)));
-                    Ok(())
+                    Ok(Value::Boolean(haystack.contains(&needle)))
                 }),
             ),
         );

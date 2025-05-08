@@ -86,8 +86,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             Box::new(|stack: &mut DSLStack| {
                 let inp = stack.pop_string()?;
                 let hash = base16ct::lower::encode_string(&Md5::digest(inp));
-                stack.push(Value::String(hash));
-                Ok(())
+                Ok(Value::String(hash))
             }),
         ),
     );
@@ -99,8 +98,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let inp = stack.pop_string()?;
                 let patt = stack.pop_string()?;
                 let reg = Regex::new(&patt).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
-                stack.push(Value::Boolean(reg.is_match(&inp)));
-                Ok(())
+                Ok(Value::Boolean(reg.is_match(&inp)))
             }),
         ),
     );
@@ -111,8 +109,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             Box::new(|stack: &mut DSLStack| {
                 let needle = stack.pop_string()?;
                 let haystack = stack.pop_string()?;
-                stack.push(Value::Boolean(haystack.contains(&needle)));
-                Ok(())
+                Ok(Value::Boolean(haystack.contains(&needle)))
             }),
         ),
     );
@@ -122,8 +119,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             1,
             Box::new(|stack: &mut DSLStack| {
                 let inp = stack.pop_string()?;
-                stack.push(Value::String(inp.to_lowercase()));
-                Ok(())
+                Ok(Value::String(inp.to_lowercase()))
             }),
         ),
     );
@@ -133,8 +129,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             1,
             Box::new(|stack: &mut DSLStack| {
                 let inp = stack.pop_string()?;
-                stack.push(Value::String(inp.to_lowercase()));
-                Ok(())
+                Ok(Value::String(inp.to_lowercase()))
             }),
         ),
     );
@@ -144,8 +139,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             1,
             Box::new(|stack: &mut DSLStack| {
                 let inp = stack.pop_string()?;
-                stack.push(Value::Int(inp.len() as i64));
-                Ok(())
+                Ok(Value::Int(inp.len() as i64))
             }),
         ),
     );
@@ -157,8 +151,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let inp = stack.pop_string()?;
                 let decoded_vec = base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
                 let decoded_str = String::from_utf8_lossy(&decoded_vec);
-                stack.push(Value::String(String::from(decoded_str)));
-                Ok(())
+                Ok(Value::String(String::from(decoded_str)))
             }),
         ),
     );

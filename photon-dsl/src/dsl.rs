@@ -463,6 +463,7 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
         }
         OPCode::Add => {
             let b = stack.pop()?;
+            // Valid to use + on 2 strings or 2 ints
             match b {
                 Value::Int(b) => {
                     let a = stack.pop_int()?;

@@ -200,6 +200,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let max = stack.pop_int()?;
                 let min = stack.pop_int()?;
 
+                // [min, max) like nuclei does, exclusive range
                 let rand_value = rand::thread_rng().gen_range(min..max);
 
                 Ok(Value::Int(rand_value))
@@ -273,8 +274,8 @@ mod tests {
             &functions,
             "base64_decode('YmFzZTY0IHRlc3Qgc3RyaW5n') == 'base64 test string'"
         ));
-        // I know these are random, but 33% chance + mainly as as sanity check
+        // Random tests, shows that rand_int is exclusive
         assert!(test_expression(&functions, "rand_int(1, 3) >= 1"));
-        assert!(test_expression(&functions, "rand_int(1, 3) <= 2"));
+        assert!(test_expression(&functions, "rand_int(1, 3) < 3"));
     }
 }

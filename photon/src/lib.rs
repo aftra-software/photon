@@ -22,6 +22,7 @@ pub mod template_loader;
 
 use std::sync::Mutex;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use md5::{Digest, Md5};
 use photon_dsl::{
     dsl::{DSLStack, Value},
@@ -157,6 +158,18 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         ),
     );
     functions.insert(
+        "base64_decode".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let decoded_vec = BASE64_STANDARD.decode(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
+                let decoded_str = String::from_utf8_lossy(&decoded_vec);
+                Ok(Value::String(String::from(decoded_str)))
+            }),
+        ),
+    );
+    functions.insert(
         "rand_int".into(),
         DslFunction::new(
             2,
@@ -233,5 +246,9 @@ mod tests {
             &functions,
             "md5('test') == '098f6bcd4621d373cade4e832627b4f6'"
         ));
+        assert!(test_expression(&functions, "base64_decode('YmFzZTY0IHRlc3Qgc3RyaW5n') == 'base64 test string'"));
+        // I know these are random, but 33% chance + mainly as as sanity check
+        assert!(test_expression(&functions, "rand_int(1, 3) >= 1"));
+        assert!(test_expression(&functions, "rand_int(1, 3) <= 2"));
     }
 }

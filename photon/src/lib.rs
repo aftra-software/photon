@@ -246,7 +246,10 @@ mod tests {
             &functions,
             "md5('test') == '098f6bcd4621d373cade4e832627b4f6'"
         ));
-        assert!(test_expression(&functions, "base64_decode('YmFzZTY0IHRlc3Qgc3RyaW5n') == 'base64 test string'"));
+        assert!(test_expression(
+            &functions,
+            "base64_decode('YmFzZTY0IHRlc3Qgc3RyaW5n') == 'base64 test string'"
+        ));
         // I know these are random, but 33% chance + mainly as as sanity check
         assert!(test_expression(&functions, "rand_int(1, 3) >= 1"));
         assert!(test_expression(&functions, "rand_int(1, 3) <= 2"));

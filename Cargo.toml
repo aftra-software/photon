@@ -10,7 +10,7 @@ resolver = "2"
 opt-level = 1
 
 [profile.release]
-lto = "thin"
+lto = true
 strip = true
 panic = "abort"
 # optimize for size, brings resulting binary size from e.g. 3MB -> 2.6MB, *slightly* slower binary, but worth it IMO

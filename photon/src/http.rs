@@ -108,19 +108,6 @@ fn parse_headers(contents: &[u8]) -> Option<Vec<(String, String)>> {
         .collect()
 }
 
-// Find CA certificate path, lazily instantiated static so consecutive calls are cached
-fn find_ca() -> String {
-    lazy_static::lazy_static! {
-        static ref ca_path: String = {
-            let r = openssl_probe::probe();
-            r.cert_file
-                    .expect("Unable to find certificate, cannot continue with HTTPS").to_string_lossy().into_owned()
-        };
-    }
-
-    ca_path.clone()
-}
-
 fn curl_do_request(
     curl: &mut Easy2<Collector>,
     options: &ExecutionOptions,
@@ -129,34 +116,21 @@ fn curl_do_request(
     headers: &[String],
     method: Method,
 ) -> Option<HttpResponse> {
-    // TODO: CURL Error Handling
+    // TODO: Proper CURL Error Handling
 
     // Reset CURL context from last request
+
     curl.get_mut().reset(); // Reset collector
     curl.reset(); // Reset handle to initial state, keeping connections open
-
-    // Manually find and set CA certificates, solves a lot of issues with statically linked libcurl.
-
-    // TODO: I don't think any of the ca cert stuff is required since we just completely ignore any verification at this point
-    // Remove?
-
-    // TODO: Do additional validation to make sure we don't run into the case where
-    // CURL can find the certs but openssl_probe can't.
-    if path.starts_with("https") {
-        // CURL resets CAINFO on Easy handle reset
-        // https://github.com/curl/curl/blob/9e54db2707214ac1e4c332c606b692ec2e88cd43/lib/easy.c#L1082
-        curl.cainfo(find_ca()).unwrap();
-    }
-
     curl.cookie_list("ALL").unwrap(); // Reset stored cookies
-    curl.useragent(&options.user_agent).unwrap();
+    
+    // Setup CURL context for this request
 
-    // Don't verify received cert
+    curl.path_as_is(true).unwrap();
+    // Don't verify any certs
+    curl.useragent(&options.user_agent).unwrap();
     curl.ssl_verify_peer(false).unwrap();
     curl.ssl_verify_host(false).unwrap();
-
-    // Setup CURL context for this request
-    curl.path_as_is(true).unwrap();
     //curl.follow_location(true).unwrap(); // Follow redirects, TODO: make configurable, AFAIK templates can change this opt
     curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
     curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.

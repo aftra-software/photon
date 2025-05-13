@@ -905,7 +905,6 @@ dependencies = [
  "lazy_static",
  "lz4",
  "md-5",
- "openssl-probe",
  "photon_dsl",
  "rand",
  "regex",

@@ -26,7 +26,7 @@ use crate::{
 pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 pub fn get_bracket_pattern() -> &'static Regex {
-    BRACKET_PATTERN.get_or_init(|| Regex::new("\\{\\{([^{}]*)}}").unwrap())
+    BRACKET_PATTERN.get_or_init(|| Regex::new(r"\{\{([^{}]*)}}").unwrap())
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -48,7 +48,9 @@ pub struct HttpReq {
 
 fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
     let mut baked = inp.to_string();
-    loop {
+    // TODO: Might be worth refactoring some of the code below.
+    // Upper bound of 100 for bake_ctx, just to prevent any infinite-loops from self-creating expressions.
+    for _ in 0..100 {
         let tmp = baked.clone();
         let matches: Vec<_> = get_bracket_pattern().captures_iter(tmp.as_str()).collect();
 
@@ -59,8 +61,10 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(Value::String(ret)) = res {
-                    baked = baked.replace(mat.get(0).unwrap().as_str(), &ret);
+                    // Replace one at a time to prevent things like {{rand_int(0, 100)}} giving always the same result in two places.
+                    baked.replace_range(mat.get(0).unwrap().range(), &ret);
                     updated += 1;
+                    break;
                 }
             }
         }

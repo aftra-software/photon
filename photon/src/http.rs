@@ -123,7 +123,7 @@ fn curl_do_request(
     curl.get_mut().reset(); // Reset collector
     curl.reset(); // Reset handle to initial state, keeping connections open
     curl.cookie_list("ALL").unwrap(); // Reset stored cookies
-    
+
     // Setup CURL context for this request
 
     curl.path_as_is(true).unwrap();

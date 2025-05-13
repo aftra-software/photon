@@ -27,6 +27,7 @@ use photon_dsl::{
     dsl::{DSLStack, Value},
     DslFunction,
 };
+use rand::Rng;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -152,6 +153,20 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let decoded_vec = base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
                 let decoded_str = String::from_utf8_lossy(&decoded_vec);
                 Ok(Value::String(String::from(decoded_str)))
+            }),
+        ),
+    );
+    functions.insert(
+        "rand_int".into(),
+        DslFunction::new(
+            2,
+            Box::new(|stack: &mut DSLStack| {
+                let max = stack.pop_int()?;
+                let min = stack.pop_int()?;
+
+                let rand_value = rand::thread_rng().gen_range(min..max);
+
+                Ok(Value::Int(rand_value))
             }),
         ),
     );

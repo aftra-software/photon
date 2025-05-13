@@ -127,8 +127,8 @@ fn curl_do_request(
     // Setup CURL context for this request
 
     curl.path_as_is(true).unwrap();
-    // Don't verify any certs
     curl.useragent(&options.user_agent).unwrap();
+    // Don't verify any certs
     curl.ssl_verify_peer(false).unwrap();
     curl.ssl_verify_host(false).unwrap();
     //curl.follow_location(true).unwrap(); // Follow redirects, TODO: make configurable, AFAIK templates can change this opt

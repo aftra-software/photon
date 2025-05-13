@@ -20,9 +20,10 @@ pub mod template;
 pub mod template_executor;
 pub mod template_loader;
 
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Duration};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
+use curl::easy::Easy;
 use md5::{Digest, Md5};
 use photon_dsl::{
     dsl::{DSLStack, Value},
@@ -76,6 +77,24 @@ pub fn set_config(config: Config) {
     });
 
     *CONFIG.lock().unwrap() = config;
+}
+
+// Basic health check for outsiders to check if domain seems alive or not.
+// Uses similar curl settings as `http.rs` for similar behavior
+pub fn health_check(url: &str) -> bool {
+    let mut curl = Easy::new();
+    curl.path_as_is(true).unwrap();
+    // TODO: maybe use useragent? for now it's just curl default for health check
+    // curl.useragent(&options.user_agent).unwrap();
+    // Don't verify any certs
+    curl.ssl_verify_peer(false).unwrap();
+    curl.ssl_verify_host(false).unwrap();
+    curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
+    curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
+    curl.timeout(Duration::from_secs(20)).unwrap();
+    curl.url(url).unwrap();
+
+    curl.perform().is_ok()
 }
 
 fn init_functions() -> FxHashMap<String, DslFunction> {

@@ -81,7 +81,7 @@ pub fn set_config(config: Config) {
 
 // Basic health check for outsiders to check if domain seems alive or not.
 // Uses similar curl settings as `http.rs` for similar behavior
-pub fn health_check(url: &str) -> bool {
+pub fn health_check(url: &str) -> Result<(), curl::Error> {
     let mut curl = Easy::new();
     curl.path_as_is(true).unwrap();
     // TODO: maybe use useragent? for now it's just curl default for health check
@@ -94,7 +94,7 @@ pub fn health_check(url: &str) -> bool {
     curl.timeout(Duration::from_secs(20)).unwrap();
     curl.url(url).unwrap();
 
-    curl.perform().is_ok()
+    curl.perform()
 }
 
 fn init_functions() -> FxHashMap<String, DslFunction> {

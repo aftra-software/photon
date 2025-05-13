@@ -1,7 +1,7 @@
 use std::{sync::Mutex, time::Instant};
 
 use clap::Parser;
-use photon::set_config;
+use photon::{health_check, set_config};
 use photon::template_executor::{ExecutionOptions, ScanError};
 use photon::{template_executor::TemplateExecutor, template_loader::TemplateLoader};
 
@@ -41,6 +41,11 @@ fn main() {
     let templ_loader = TemplateLoader::load_from_path(&args.templates);
 
     let base_url = &args.url;
+
+    if let Err(err) = health_check(&base_url) {
+        println!("Healthcheck failed: {}", err.description());
+        return;
+    }
 
     let last_reqs = Mutex::from(0);
     let stopwatch = Mutex::from(Instant::now());

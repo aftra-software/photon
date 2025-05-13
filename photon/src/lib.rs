@@ -164,8 +164,15 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             Box::new(|stack: &mut DSLStack| {
                 let inp = stack.pop_string()?;
                 let decoded_vec = BASE64_STANDARD.decode(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
-                let decoded_str = String::from_utf8_lossy(&decoded_vec);
-                Ok(Value::String(String::from(decoded_str)))
+                let res = String::from_utf8(decoded_vec); // TODO: possibly needs to return raw bytes (not supported in DSL right now) instead of valid UTF-8
+                match res {
+                    Ok(decoded_str) => {
+                        Ok(Value::String(decoded_str))
+                    },
+                    Err(_) => {
+                        Err(())
+                    }
+                }
             }),
         ),
     );

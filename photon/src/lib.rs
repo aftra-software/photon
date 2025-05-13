@@ -20,13 +20,16 @@ pub mod template;
 pub mod template_executor;
 pub mod template_loader;
 
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Duration};
 
+use base64::{prelude::BASE64_STANDARD, Engine};
+use curl::easy::Easy;
 use md5::{Digest, Md5};
 use photon_dsl::{
     dsl::{DSLStack, Value},
     DslFunction,
 };
+use rand::Rng;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -74,6 +77,24 @@ pub fn set_config(config: Config) {
     });
 
     *CONFIG.lock().unwrap() = config;
+}
+
+// Basic health check for outsiders to check if domain seems alive or not.
+// Uses similar curl settings as `http.rs` for similar behavior
+pub fn health_check(url: &str) -> Result<(), curl::Error> {
+    let mut curl = Easy::new();
+    curl.path_as_is(true).unwrap();
+    // TODO: maybe use useragent? for now it's just curl default for health check
+    // curl.useragent(&options.user_agent).unwrap();
+    // Don't verify any certs
+    curl.ssl_verify_peer(false).unwrap();
+    curl.ssl_verify_host(false).unwrap();
+    curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
+    curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
+    curl.timeout(Duration::from_secs(20)).unwrap();
+    curl.url(url).unwrap();
+
+    curl.perform()
 }
 
 fn init_functions() -> FxHashMap<String, DslFunction> {
@@ -155,6 +176,37 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
+    functions.insert(
+        "base64_decode".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let decoded_vec = BASE64_STANDARD.decode(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
+
+                // TODO: possibly needs to return raw bytes (not supported in DSL right now) instead of valid UTF-8
+                match String::from_utf8(decoded_vec) {
+                    Ok(decoded_str) => Ok(Value::String(decoded_str)),
+                    Err(_) => Err(()),
+                }
+            }),
+        ),
+    );
+    functions.insert(
+        "rand_int".into(),
+        DslFunction::new(
+            2,
+            Box::new(|stack: &mut DSLStack| {
+                let max = stack.pop_int()?;
+                let min = stack.pop_int()?;
+
+                // [min, max) like nuclei does, exclusive range
+                let rand_value = rand::thread_rng().gen_range(min..max);
+
+                Ok(Value::Int(rand_value))
+            }),
+        ),
+    );
 
     functions
 }
@@ -218,5 +270,12 @@ mod tests {
             &functions,
             "md5('test') == '098f6bcd4621d373cade4e832627b4f6'"
         ));
+        assert!(test_expression(
+            &functions,
+            "base64_decode('YmFzZTY0IHRlc3Qgc3RyaW5n') == 'base64 test string'"
+        ));
+        // Random tests, shows that rand_int is exclusive
+        assert!(test_expression(&functions, "rand_int(1, 3) >= 1"));
+        assert!(test_expression(&functions, "rand_int(1, 3) < 3"));
     }
 }

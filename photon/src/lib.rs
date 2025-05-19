@@ -81,7 +81,7 @@ pub fn set_config(config: Config) {
 
 // Basic health check for outsiders to check if domain seems alive or not.
 // Uses similar curl settings as `http.rs` for similar behavior
-pub fn health_check(url: &str) -> Result<(), curl::Error> {
+pub fn health_check(url: &str, timeout: Duration) -> Result<(), curl::Error> {
     let mut curl = Easy::new();
     curl.path_as_is(true).unwrap();
     // TODO: maybe use useragent? for now it's just curl default for health check
@@ -91,7 +91,7 @@ pub fn health_check(url: &str) -> Result<(), curl::Error> {
     curl.ssl_verify_host(false).unwrap();
     curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
     curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
-    curl.timeout(Duration::from_secs(20)).unwrap();
+    curl.timeout(timeout).unwrap();
     curl.url(url).unwrap();
 
     curl.perform()

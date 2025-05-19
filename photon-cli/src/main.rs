@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::{sync::Mutex, time::Instant};
 
 use clap::Parser;
@@ -42,7 +43,7 @@ fn main() {
 
     let base_url = &args.url;
 
-    if let Err(err) = health_check(&base_url) {
+    if let Err(err) = health_check(&base_url, Duration::from_secs(15)) {
         println!("Healthcheck failed: {}", err.description());
         return;
     }

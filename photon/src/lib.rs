@@ -83,16 +83,16 @@ pub fn set_config(config: Config) {
 // Uses similar curl settings as `http.rs` for similar behavior
 pub fn health_check(url: &str, timeout: Duration) -> Result<(), curl::Error> {
     let mut curl = Easy::new();
-    curl.path_as_is(true).unwrap();
+    curl.path_as_is(true)?;
     // TODO: maybe use useragent? for now it's just curl default for health check
     // curl.useragent(&options.user_agent).unwrap();
     // Don't verify any certs
-    curl.ssl_verify_peer(false).unwrap();
-    curl.ssl_verify_host(false).unwrap();
-    curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
-    curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
-    curl.timeout(timeout).unwrap();
-    curl.url(url).unwrap();
+    curl.ssl_verify_peer(false)?;
+    curl.ssl_verify_host(false)?;
+    curl.http_09_allowed(true)?; // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
+    curl.accept_encoding("")?; // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
+    curl.timeout(timeout)?;
+    curl.url(url)?;
 
     curl.perform()
 }

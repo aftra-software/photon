@@ -315,10 +315,16 @@ pub fn parse_matcher(
 }
 
 pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpRequest, TemplateError> {
+    let redirects = yaml["redirects"].as_bool();
+    let host_redirects = yaml["host-redirects"].as_bool();
+    let max_redirects = yaml["max-redirects"].as_i64();
     let http_method = yaml["method"].as_str();
     let http_body = yaml["body"].as_str();
     let http_matchers = yaml["matchers"].as_vec();
     let http_extractors = yaml["extractors"].as_vec();
+
+    let follow_redirects = redirects.is_some_and(|val| val) || host_redirects.is_some_and(|val| val);
+    let max_redirects = max_redirects.map(|val| val as u32);
 
     if http_matchers.is_none() {
         return Err(TemplateError::MissingField("matchers".into()));
@@ -419,6 +425,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 path: item.as_str().unwrap().to_string(),
                 raw: String::new(),
                 headers: Vec::new(),
+                follow_redirects,
+                max_redirects,
             })
             .collect()
     } else if yaml["path"].as_str().is_some() {
@@ -432,6 +440,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 path: item.to_string(),
                 raw: String::new(),
                 headers: Vec::new(),
+                follow_redirects,
+                max_redirects,
             })
             .collect()
     } else {
@@ -449,6 +459,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 path: String::new(),
                 raw: item.as_str().unwrap().to_string(),
                 headers: Vec::new(),
+                follow_redirects,
+                max_redirects,
             })
             .collect()
     } else if yaml["raw"].as_str().is_some() {
@@ -458,6 +470,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             path: String::new(),
             raw: yaml["raw"].as_str().unwrap().into(),
             headers: Vec::new(),
+            follow_redirects,
+            max_redirects,
         }]
     } else {
         vec![]

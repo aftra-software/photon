@@ -98,7 +98,9 @@ fn unescape(s: &str) -> Result<String, ()> {
 fn parse_primary(primary: Pair<'_, Rule>) -> Expr {
     match primary.as_rule() {
         Rule::expr | Rule::clause | Rule::_string => parse_expr(primary.into_inner()),
-        Rule::single_string | Rule::double_string => Expr::Constant(Value::String(unescape(primary.as_str()).unwrap())),
+        Rule::single_string | Rule::double_string => {
+            Expr::Constant(Value::String(unescape(primary.as_str()).unwrap()))
+        }
         Rule::boolean => Expr::Constant(Value::Boolean(primary.as_str().parse::<bool>().unwrap())),
         Rule::variable => Expr::Variable(primary.as_str().to_string()),
         Rule::digit => {

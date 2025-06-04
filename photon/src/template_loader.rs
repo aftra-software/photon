@@ -323,7 +323,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     let http_matchers = yaml["matchers"].as_vec();
     let http_extractors = yaml["extractors"].as_vec();
 
-    let follow_redirects = redirects.is_some_and(|val| val) || host_redirects.is_some_and(|val| val);
+    let follow_redirects =
+        redirects.is_some_and(|val| val) || host_redirects.is_some_and(|val| val);
     let max_redirects = max_redirects.map(|val| val as u32);
 
     if http_matchers.is_none() {

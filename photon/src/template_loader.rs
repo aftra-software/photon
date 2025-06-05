@@ -12,8 +12,7 @@ use crate::{
     get_config,
     http::{get_bracket_pattern, HttpReq},
     template::{
-        Condition, Extractor, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart,
-        Severity, Template,
+        Condition, Extractor, ExtractorPart, ExtractorType, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity, Template
     },
 };
 
@@ -81,6 +80,14 @@ fn map_part(part: &str) -> Option<ResponsePart> {
     }
 }
 
+fn map_extractor_part(part: &str) -> Option<ExtractorPart> {
+    match part.to_lowercase().as_str() {
+        "header" => Some(ExtractorPart::Header),
+        "cookie" => Some(ExtractorPart::Cookie),
+        _ => None,
+    }
+}
+
 fn map_condition(condition: &str) -> Option<Condition> {
     match condition.to_lowercase().as_str() {
         "or" => Some(Condition::OR),
@@ -99,7 +106,7 @@ fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
     }
 }
 
-fn validate_fields(fields: &[(Option<&str>, &str)]) -> Result<(), TemplateError> {
+fn assert_fields<T>(fields: &[(Option<T>, &str)]) -> Result<(), TemplateError> {
     for (field, name) in fields {
         if field.is_none() {
             return Err(TemplateError::MissingField((*name).to_string()));
@@ -114,7 +121,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     let info_description = yaml["description"].as_str();
     let info_severity = yaml["severity"].as_str();
 
-    validate_fields(&[
+    assert_fields(&[
         (info_name, "name"),
         (info_author, "author"),
         (info_severity, "severity"),
@@ -170,54 +177,8 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     })
 }
 
-pub fn parse_matcher(
-    yaml: &Yaml,
-    matchers_condition: Condition,
-    regex_cache: &mut RegexCache,
-) -> Result<Option<Matcher>, TemplateError> {
-    let matcher_part = yaml["part"].as_str();
-    let matcher_type = yaml["type"].as_str();
-    let matcher_name = yaml["name"].as_str();
-    validate_fields(&[(matcher_type, "type")])?;
-
-    let r#type = map_matcher_type(matcher_type.unwrap());
-    if r#type.is_none() {
-        return Err(TemplateError::InvalidValue("type".into()));
-    }
-
-    let mut matcher_type = r#type.unwrap();
-
-    let part = {
-        let part_mat = match matcher_part {
-            Some(match_part) => map_part(match_part),
-            None => Some(ResponsePart::Body),
-        };
-        if part_mat.is_none() {
-            // Mather part is not required if matcher type is DSL
-            // We also currently ignore missing parts if the match is optional either way
-            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::DSL(_)) {
-                return Ok(None);
-            } else {
-                return Err(TemplateError::InvalidValue("part".into()));
-            }
-        }
-        part_mat.unwrap()
-    };
-
-    let condition = if yaml["condition"].as_str().is_some() {
-        match map_condition(yaml["condition"].as_str().unwrap()) {
-            Some(condition) => condition,
-            None => return Err(TemplateError::InvalidValue("condition".into())),
-        }
-    } else {
-        Condition::OR
-    };
-
-    let negative = yaml["negative"].as_bool().unwrap_or(false);
-    let internal = yaml["internal"].as_bool().unwrap_or(false);
-    let group = yaml["group"].as_i64();
-
-    match &mut matcher_type {
+fn parse_matcher_type(yaml: &Yaml, matcher: &mut MatcherType, regex_cache: &mut RegexCache) -> Result<(), TemplateError> {
+    match matcher {
         MatcherType::Word(words) => {
             let words_list = yaml["words"].as_vec();
             if words_list.is_none() {
@@ -300,6 +261,105 @@ pub fn parse_matcher(
             statuses.append(&mut status_values);
         }
     }
+
+    Ok(())
+}
+
+pub fn parse_extractor(
+    yaml: &Yaml,
+    matchers_condition: Condition,
+    regex_cache: &mut RegexCache,
+) -> Result<Extractor, TemplateError> {
+    let extractor_part = yaml["part"].as_str();
+    let extractor_type = yaml["type"].as_str();
+    let extractor_name = yaml["name"].as_str();
+    assert_fields(&[(extractor_type, "type")])?;
+
+    // TODO: Default extractor might be both Cookie + Header, so a secret third ExtractorPart
+    let part = match extractor_part {
+        Some(extractor_part) => map_extractor_part(extractor_part).ok_or(TemplateError::InvalidValue("part".into()))?,
+        None => ExtractorPart::Header,
+    };
+
+    let type_name = extractor_type.unwrap();
+    let extractor_type = match type_name {
+        "word" | "dsl" | "regex" | "status" => {
+            let mut matcher_type = map_matcher_type(type_name).unwrap();
+            // Modifies matcher_type in-place
+            parse_matcher_type(yaml, &mut matcher_type, regex_cache)?;
+            ExtractorType::Matcher(matcher_type)
+        },
+        "kval" => {
+            let kval = yaml["part"].as_vec();
+            assert_fields(&[(kval, "kval")])?;
+            let mut kval_strings: Vec<String> = kval
+                .unwrap()
+                .iter()
+                .map(|item| item.as_str().unwrap().to_string())
+                .collect();
+            ExtractorType::Kval(kval_strings)
+        }
+        _ => {
+            return Err(TemplateError::InvalidValue("type".into()))
+        }
+    };
+
+    let internal = yaml["internal"].as_bool().unwrap_or(false);
+    let group = yaml["group"].as_i64();
+    let name = extractor_name.map(|name| name.to_string());
+
+    Ok(Extractor { r#type: extractor_type, name, group, internal, part })
+}
+
+pub fn parse_matcher(
+    yaml: &Yaml,
+    matchers_condition: Condition,
+    regex_cache: &mut RegexCache,
+) -> Result<Option<Matcher>, TemplateError> {
+    let matcher_part = yaml["part"].as_str();
+    let matcher_type = yaml["type"].as_str();
+    let matcher_name = yaml["name"].as_str();
+    assert_fields(&[(matcher_type, "type")])?;
+
+    let r#type = map_matcher_type(matcher_type.unwrap());
+    if r#type.is_none() {
+        return Err(TemplateError::InvalidValue("type".into()));
+    }
+
+    let mut matcher_type = r#type.unwrap();
+
+    let part = {
+        let part_mat = match matcher_part {
+            Some(match_part) => map_part(match_part),
+            None => Some(ResponsePart::Body),
+        };
+        if part_mat.is_none() {
+            // Mather part is not required if matcher type is DSL
+            // We also currently ignore missing parts if the match is optional either way
+            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::DSL(_)) {
+                return Ok(None);
+            } else {
+                return Err(TemplateError::InvalidValue("part".into()));
+            }
+        }
+        part_mat.unwrap()
+    };
+
+    let condition = if yaml["condition"].as_str().is_some() {
+        match map_condition(yaml["condition"].as_str().unwrap()) {
+            Some(condition) => condition,
+            None => return Err(TemplateError::InvalidValue("condition".into())),
+        }
+    } else {
+        Condition::OR
+    };
+
+    let negative = yaml["negative"].as_bool().unwrap_or(false);
+    let internal = yaml["internal"].as_bool().unwrap_or(false);
+    let group = yaml["group"].as_i64();
+
+    // Modifies matcher_type in-place
+    parse_matcher_type(yaml, &mut matcher_type, regex_cache)?;
 
     let name = matcher_name.map(|name| name.to_string());
 
@@ -384,7 +444,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         let extractors_parsed: Vec<_> = http_extractors
             .unwrap()
             .iter()
-            .map(|item| parse_matcher(item, matchers_condition, regex_cache))
+            .map(|item| parse_extractor(item, matchers_condition, regex_cache))
             .collect();
         if extractors_parsed.iter().any(Result::is_err) {
             return Err(extractors_parsed
@@ -396,19 +456,6 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         extractors_parsed
             .into_iter()
             .flatten()
-            .filter_map(|item| {
-                if let Some(matcher) = item {
-                    Some(Extractor {
-                        r#type: matcher.r#type,
-                        group: matcher.group,
-                        internal: matcher.internal,
-                        name: matcher.name,
-                        part: matcher.part,
-                    })
-                } else {
-                    None
-                }
-            })
             .collect()
     } else {
         vec![]

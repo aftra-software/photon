@@ -41,6 +41,23 @@ pub enum MatcherType {
     Status(Vec<u32>),
 }
 
+#[derive(Debug, Clone)]
+pub enum ExtractorType {
+    Matcher(MatcherType),
+    Kval(Vec<String>)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ExtractorPart {
+    Header,
+    Cookie,
+    // Response Parts
+    Body,
+    Raw,
+    All,
+    Response, // Seems to be an alias for All, https://github.com/projectdiscovery/nuclei/blob/dev/SYNTAX-REFERENCE.md#httprequest
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ResponsePart {
     Body,
@@ -80,11 +97,11 @@ pub struct Matcher {
 
 #[derive(Debug, Clone)]
 pub struct Extractor {
-    pub r#type: MatcherType,
+    pub r#type: ExtractorType,
     pub name: Option<String>,
     pub group: Option<i64>, // Regex group number, None represents entire regex match
     pub internal: bool,     // Used for workflows, matches, but does not print
-    pub part: ResponsePart,
+    pub part: ExtractorPart,
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +208,28 @@ impl Severity {
     }
 }
 
+fn extractor_part_to_string(data: &HttpResponse, part: ExtractorPart) -> String {
+    match part {
+        // Map 1:1 Extractor -> Response parts
+        ExtractorPart::All => response_to_string(data, ResponsePart::All),
+        ExtractorPart::Response => response_to_string(data, ResponsePart::Response),
+        ExtractorPart::Body => response_to_string(data, ResponsePart::Body),
+        ExtractorPart::Raw => response_to_string(data, ResponsePart::Raw),
+        ExtractorPart::Header => response_to_string(data, ResponsePart::Header),
+
+        // Concatenated all cookie headers into a single string
+        ExtractorPart::Cookie => {
+            data
+                .headers
+                .iter()
+                .filter(|(key, val)| key.to_lowercase() == "cookie")
+                .map(|(key, value)| format!("{value}\n"))
+                .collect::<Vec<String>>()
+                .concat()
+        },
+    }
+}
+
 fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
     match part {
         ResponsePart::All | ResponsePart::Response => {
@@ -286,35 +325,42 @@ impl Extractor {
         context: &Context,
         photon_context: &PhotonContext,
     ) -> Option<Value> {
-        if let MatcherType::Status(_) = self.r#type {
-            return self.matches_status(data.status_code);
-        }
+        match self.r#type {
+            ExtractorType::Matcher(matcher) => {
+                if let MatcherType::Status(_) = matcher {
+                    return self.matches_status(data.status_code);
+                }
 
-        let data = response_to_string(data, self.part);
-        match &self.r#type {
-            MatcherType::DSL(dsls) => dsls
-                .iter()
-                .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
-                .next(),
-            MatcherType::Regex(regexes) => regexes
-                .iter()
-                .filter_map(|pattern| {
-                    regex_cache.match_group(*pattern, &data, self.group.unwrap_or(0) as usize)
-                })
-                .next()
-                .map(Value::String),
-            MatcherType::Word(_) => {
-                debug!("Extractor does not support Word matching");
-                None
+                let data = extractor_part_to_string(data, self.part);
+                match &matcher {
+                    MatcherType::DSL(dsls) => dsls
+                        .iter()
+                        .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
+                        .next(),
+                    MatcherType::Regex(regexes) => regexes
+                        .iter()
+                        .filter_map(|pattern| {
+                            regex_cache.match_group(*pattern, &data, self.group.unwrap_or(0) as usize)
+                        })
+                        .next()
+                        .map(Value::String),
+                    MatcherType::Word(_) => {
+                        debug!("Extractor does not support Word matching");
+                        None
+                    }
+                    MatcherType::Status(_) => None,
+                }
+            },
+            ExtractorType::Kval(fields) => {
+                //TODO: figure this shit out
             }
-            MatcherType::Status(_) => None,
         }
     }
 
     fn matches_status(&self, status: u32) -> Option<Value> {
         match &self.r#type {
             // TODO: Maybe this should be different/Not implemented for Extractor
-            MatcherType::Status(_) => Some(Value::Int(status as i64)),
+            ExtractorType::Matcher(MatcherType::Status(_)) => Some(Value::Int(status as i64)),
             _ => unreachable!("Cannot match status when type != MatcherType::Status"),
         }
     }

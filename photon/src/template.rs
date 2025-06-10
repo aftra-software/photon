@@ -136,15 +136,8 @@ impl Context {
 // Recursive context container, check current variables, if not found check parent
 impl VariableContainer for Context {
     fn contains_key(&self, key: &str) -> bool {
-        if self.parent.is_some() {
-            self.variables.contains_key(key)
-                || self
-                    .parent
-                    .as_ref()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .contains_key(key)
+        if let Some(parent) = &self.parent {
+            self.variables.contains_key(key) || parent.lock().unwrap().contains_key(key)
         } else {
             self.variables.contains_key(key)
         }
@@ -221,11 +214,29 @@ fn extractor_part_to_string(data: &HttpResponse, part: ExtractorPart) -> String 
         ExtractorPart::Cookie => data
             .headers
             .iter()
-            .filter(|(key, val)| key.to_lowercase() == "cookie")
-            .map(|(key, value)| format!("{value}\n"))
+            .filter(|(key, _)| key.to_lowercase() == "set-cookie")
+            .map(|(_, value)| format!("{value}\n"))
             .collect::<Vec<String>>()
             .concat(),
     }
+}
+
+// Get (Key, Value) pairs from cookies
+fn extractor_get_cookies(data: &HttpResponse) -> Vec<(String, String)> {
+    data.headers
+        .iter()
+        .filter(|(key, _)| key.to_lowercase() == "set-cookie")
+        .filter_map(|(_, value)| {
+            let cookie_kv = value.split(';').next().unwrap().split_once('=');
+            if let Some((key, value)) = cookie_kv {
+                // https://docs.projectdiscovery.io/templates/reference/extractors#kval-extractor
+                // Nuclei kval extractors don't support dashes, so we modify the key to conform to their spec
+                Some((String::from(key).replace('-', "_"), String::from(value)))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<(String, String)>>()
 }
 
 fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
@@ -323,7 +334,7 @@ impl Extractor {
         context: &Context,
         photon_context: &PhotonContext,
     ) -> Option<Value> {
-        match self.r#type {
+        match &self.r#type {
             ExtractorType::Matcher(matcher) => {
                 if let MatcherType::Status(_) = matcher {
                     return self.matches_status(data.status_code);
@@ -354,7 +365,15 @@ impl Extractor {
                 }
             }
             ExtractorType::Kval(fields) => {
-                //TODO: figure this shit out
+                let cookies = extractor_get_cookies(data);
+                // This seems to be the logic nuclei is using
+                // TODO: Verify that this is indeed the logic nuclei is using.
+                for field in fields {
+                    if let Some((_, value)) = cookies.iter().find(|(k, _)| k == field) {
+                        return Some(Value::String(value.clone()));
+                    }
+                }
+                None
             }
         }
     }

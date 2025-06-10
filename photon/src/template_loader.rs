@@ -85,6 +85,11 @@ fn map_extractor_part(part: &str) -> Option<ExtractorPart> {
     match part.to_lowercase().as_str() {
         "header" => Some(ExtractorPart::Header),
         "cookie" => Some(ExtractorPart::Cookie),
+        // Extractor version of ResponseParts
+        "body" => Some(ExtractorPart::Body),
+        "response" => Some(ExtractorPart::Response),
+        "all" => Some(ExtractorPart::All),
+        "raw" => Some(ExtractorPart::Raw),
         _ => None,
     }
 }
@@ -297,9 +302,9 @@ pub fn parse_extractor(
             ExtractorType::Matcher(matcher_type)
         }
         "kval" => {
-            let kval = yaml["part"].as_vec();
+            let kval = yaml["kval"].as_vec();
             assert_fields(&[(kval, "kval")])?;
-            let mut kval_strings: Vec<String> = kval
+            let kval_strings: Vec<String> = kval
                 .unwrap()
                 .iter()
                 .map(|item| item.as_str().unwrap().to_string())

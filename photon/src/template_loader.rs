@@ -12,7 +12,8 @@ use crate::{
     get_config,
     http::{get_bracket_pattern, HttpReq},
     template::{
-        Condition, Extractor, ExtractorPart, ExtractorType, HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity, Template
+        Condition, Extractor, ExtractorPart, ExtractorType, HttpRequest, Info, Matcher,
+        MatcherType, Method, ResponsePart, Severity, Template,
     },
 };
 
@@ -177,7 +178,11 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     })
 }
 
-fn parse_matcher_type(yaml: &Yaml, matcher: &mut MatcherType, regex_cache: &mut RegexCache) -> Result<(), TemplateError> {
+fn parse_matcher_type(
+    yaml: &Yaml,
+    matcher: &mut MatcherType,
+    regex_cache: &mut RegexCache,
+) -> Result<(), TemplateError> {
     match matcher {
         MatcherType::Word(words) => {
             let words_list = yaml["words"].as_vec();
@@ -277,7 +282,9 @@ pub fn parse_extractor(
 
     // TODO: Default extractor might be both Cookie + Header, so a secret third ExtractorPart
     let part = match extractor_part {
-        Some(extractor_part) => map_extractor_part(extractor_part).ok_or(TemplateError::InvalidValue("part".into()))?,
+        Some(extractor_part) => {
+            map_extractor_part(extractor_part).ok_or(TemplateError::InvalidValue("part".into()))?
+        }
         None => ExtractorPart::Header,
     };
 
@@ -288,7 +295,7 @@ pub fn parse_extractor(
             // Modifies matcher_type in-place
             parse_matcher_type(yaml, &mut matcher_type, regex_cache)?;
             ExtractorType::Matcher(matcher_type)
-        },
+        }
         "kval" => {
             let kval = yaml["part"].as_vec();
             assert_fields(&[(kval, "kval")])?;
@@ -299,16 +306,20 @@ pub fn parse_extractor(
                 .collect();
             ExtractorType::Kval(kval_strings)
         }
-        _ => {
-            return Err(TemplateError::InvalidValue("type".into()))
-        }
+        _ => return Err(TemplateError::InvalidValue("type".into())),
     };
 
     let internal = yaml["internal"].as_bool().unwrap_or(false);
     let group = yaml["group"].as_i64();
     let name = extractor_name.map(|name| name.to_string());
 
-    Ok(Extractor { r#type: extractor_type, name, group, internal, part })
+    Ok(Extractor {
+        r#type: extractor_type,
+        name,
+        group,
+        internal,
+        part,
+    })
 }
 
 pub fn parse_matcher(
@@ -453,10 +464,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 .unwrap()
                 .unwrap_err());
         }
-        extractors_parsed
-            .into_iter()
-            .flatten()
-            .collect()
+        extractors_parsed.into_iter().flatten().collect()
     } else {
         vec![]
     };

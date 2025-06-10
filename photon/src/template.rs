@@ -44,7 +44,7 @@ pub enum MatcherType {
 #[derive(Debug, Clone)]
 pub enum ExtractorType {
     Matcher(MatcherType),
-    Kval(Vec<String>)
+    Kval(Vec<String>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -218,15 +218,13 @@ fn extractor_part_to_string(data: &HttpResponse, part: ExtractorPart) -> String 
         ExtractorPart::Header => response_to_string(data, ResponsePart::Header),
 
         // Concatenated all cookie headers into a single string
-        ExtractorPart::Cookie => {
-            data
-                .headers
-                .iter()
-                .filter(|(key, val)| key.to_lowercase() == "cookie")
-                .map(|(key, value)| format!("{value}\n"))
-                .collect::<Vec<String>>()
-                .concat()
-        },
+        ExtractorPart::Cookie => data
+            .headers
+            .iter()
+            .filter(|(key, val)| key.to_lowercase() == "cookie")
+            .map(|(key, value)| format!("{value}\n"))
+            .collect::<Vec<String>>()
+            .concat(),
     }
 }
 
@@ -340,7 +338,11 @@ impl Extractor {
                     MatcherType::Regex(regexes) => regexes
                         .iter()
                         .filter_map(|pattern| {
-                            regex_cache.match_group(*pattern, &data, self.group.unwrap_or(0) as usize)
+                            regex_cache.match_group(
+                                *pattern,
+                                &data,
+                                self.group.unwrap_or(0) as usize,
+                            )
                         })
                         .next()
                         .map(Value::String),
@@ -350,7 +352,7 @@ impl Extractor {
                     }
                     MatcherType::Status(_) => None,
                 }
-            },
+            }
             ExtractorType::Kval(fields) => {
                 //TODO: figure this shit out
             }

@@ -44,6 +44,8 @@ pub struct HttpReq {
     pub path: String,
     pub body: String,
     pub raw: String,
+    pub follow_redirects: bool,
+    pub max_redirects: Option<u32>,
 }
 
 fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
@@ -111,10 +113,9 @@ fn parse_headers(contents: &[u8]) -> Option<Vec<(String, String)>> {
 fn curl_do_request(
     curl: &mut Easy2<Collector>,
     options: &ExecutionOptions,
+    req: &HttpReq,
     path: &str,
     body: &[u8],
-    headers: &[String],
-    method: Method,
 ) -> Option<HttpResponse> {
     // TODO: Proper CURL Error Handling
 
@@ -131,7 +132,15 @@ fn curl_do_request(
     // Don't verify any certs
     curl.ssl_verify_peer(false).unwrap();
     curl.ssl_verify_host(false).unwrap();
-    //curl.follow_location(true).unwrap(); // Follow redirects, TODO: make configurable, AFAIK templates can change this opt
+    // TODO: Handle host-redirects that only redirect on same host,
+    // Curl doesn't natively support such behavior, so we might have to do some Location header shenanigans
+    // Using the Collector. For now, both host-redirects and redirects behave the same
+    curl.follow_location(req.follow_redirects).unwrap();
+    // TODO: max_redirections param is incorrect, so for now we use an optional u32
+    // see https://github.com/alexcrichton/curl-rust/issues/603
+    if let Some(max_redirects) = req.max_redirects {
+        curl.max_redirections(max_redirects).unwrap();
+    }
     curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
     curl.accept_encoding("").unwrap(); // Tell CURL to accept compressed & automatically decompress body, some websites send compressed even when accept-encoding is not set.
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
@@ -141,7 +150,7 @@ fn curl_do_request(
         curl.post_fields_copy(body).unwrap();
     }
 
-    match method {
+    match req.method {
         Method::GET => {
             curl.get(true).unwrap();
         }
@@ -165,7 +174,7 @@ fn curl_do_request(
     }
 
     let mut parsed_headers = List::new();
-    for header in headers.iter() {
+    for header in &req.headers {
         parsed_headers.append(header).unwrap();
     }
     for header in &options.extra_headers {
@@ -222,14 +231,7 @@ impl HttpReq {
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let resp = curl_do_request(
-            curl,
-            options,
-            path,
-            self.body.as_bytes(),
-            &self.headers,
-            self.method,
-        );
+        let resp = curl_do_request(curl, options, &self, path, self.body.as_bytes());
         if resp.is_some() {
             // Successful request
             *req_counter += 1;
@@ -306,14 +308,7 @@ impl HttpReq {
             headers.push(format!("{}: {}", header.name, val_str.unwrap()));
         }
 
-        let resp = curl_do_request(
-            curl,
-            options,
-            &path,
-            body.as_bytes(),
-            &self.headers,
-            self.method,
-        );
+        let resp = curl_do_request(curl, options, &self, &path, body.as_bytes());
         if resp.is_some() {
             // Successful request
             *req_counter += 1;

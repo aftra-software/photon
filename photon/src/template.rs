@@ -41,6 +41,24 @@ pub enum MatcherType {
     Status(Vec<u32>),
 }
 
+#[derive(Debug, Clone)]
+pub enum ExtractorType {
+    Matcher(MatcherType),
+    Kval(Vec<String>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ExtractorPart {
+    HeaderCookie, // Either Header or Cookie, with Header having priority
+    Header,
+    Cookie,
+    // Response Parts
+    Body,
+    Raw,
+    All,
+    Response, // Seems to be an alias for All, https://github.com/projectdiscovery/nuclei/blob/dev/SYNTAX-REFERENCE.md#httprequest
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ResponsePart {
     Body,
@@ -80,11 +98,11 @@ pub struct Matcher {
 
 #[derive(Debug, Clone)]
 pub struct Extractor {
-    pub r#type: MatcherType,
+    pub r#type: ExtractorType,
     pub name: Option<String>,
     pub group: Option<i64>, // Regex group number, None represents entire regex match
     pub internal: bool,     // Used for workflows, matches, but does not print
-    pub part: ResponsePart,
+    pub part: ExtractorPart,
 }
 
 #[derive(Debug, Clone)]
@@ -119,15 +137,8 @@ impl Context {
 // Recursive context container, check current variables, if not found check parent
 impl VariableContainer for Context {
     fn contains_key(&self, key: &str) -> bool {
-        if self.parent.is_some() {
-            self.variables.contains_key(key)
-                || self
-                    .parent
-                    .as_ref()
-                    .unwrap()
-                    .lock()
-                    .unwrap()
-                    .contains_key(key)
+        if let Some(parent) = &self.parent {
+            self.variables.contains_key(key) || parent.lock().unwrap().contains_key(key)
         } else {
             self.variables.contains_key(key)
         }
@@ -172,6 +183,7 @@ pub struct Template {
     pub variables: Vec<(String, Value)>,
 }
 
+// TODO: MatchResult value from extractor (figure out how we want to handle that logic as well)
 #[derive(Debug)]
 pub struct MatchResult {
     pub name: String,
@@ -189,6 +201,47 @@ impl Severity {
             Self::Unknown => "\x1b[0;90munknown\x1b[0m".to_string(),
         }
     }
+}
+
+fn extractor_part_to_string(data: &HttpResponse, part: ExtractorPart) -> String {
+    match part {
+        // Map 1:1 Extractor -> Response parts
+        ExtractorPart::All => response_to_string(data, ResponsePart::All),
+        ExtractorPart::Response => response_to_string(data, ResponsePart::Response),
+        ExtractorPart::Body => response_to_string(data, ResponsePart::Body),
+        ExtractorPart::Raw => response_to_string(data, ResponsePart::Raw),
+        // Cookies are in Headers, so HeaderCookie maps to Headers string
+        ExtractorPart::Header | ExtractorPart::HeaderCookie => {
+            response_to_string(data, ResponsePart::Header)
+        }
+
+        // Concatenated all cookie headers into a single string
+        ExtractorPart::Cookie => data
+            .headers
+            .iter()
+            .filter(|(key, _)| key.to_lowercase() == "set-cookie")
+            .map(|(_, value)| format!("{value}\n"))
+            .collect::<Vec<String>>()
+            .concat(),
+    }
+}
+
+// Get (Key, Value) pairs from cookies
+fn extractor_get_cookies(data: &HttpResponse) -> Vec<(String, String)> {
+    data.headers
+        .iter()
+        .filter(|(key, _)| key.to_lowercase() == "set-cookie")
+        .filter_map(|(_, value)| {
+            let cookie_kv = value.split(';').next().unwrap().split_once('=');
+            if let Some((key, value)) = cookie_kv {
+                // https://docs.projectdiscovery.io/templates/reference/extractors#kval-extractor
+                // Nuclei kval extractors don't support dashes, so we modify the key to conform to their spec
+                Some((String::from(key).replace('-', "_"), String::from(value)))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<(String, String)>>()
 }
 
 fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
@@ -279,6 +332,14 @@ impl Matcher {
 }
 
 impl Extractor {
+    // TODO: Allow multiple returns, with matchers being ran with all permutations
+    // of all possible extracted values? That's the logic according to testing with Nuclei
+    // where the matcher is ran like this pseudo logic:
+    // values.iter().any(|val| {
+    //    context.set(name, val)
+    //    matcher.matches(context)
+    //})
+    // if either matches, both values are added into the match
     pub fn extract(
         &self,
         data: &HttpResponse,
@@ -286,35 +347,77 @@ impl Extractor {
         context: &Context,
         photon_context: &PhotonContext,
     ) -> Option<Value> {
-        if let MatcherType::Status(_) = self.r#type {
-            return self.matches_status(data.status_code);
-        }
-
-        let data = response_to_string(data, self.part);
         match &self.r#type {
-            MatcherType::DSL(dsls) => dsls
-                .iter()
-                .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
-                .next(),
-            MatcherType::Regex(regexes) => regexes
-                .iter()
-                .filter_map(|pattern| {
-                    regex_cache.match_group(*pattern, &data, self.group.unwrap_or(0) as usize)
-                })
-                .next()
-                .map(Value::String),
-            MatcherType::Word(_) => {
-                debug!("Extractor does not support Word matching");
+            ExtractorType::Matcher(matcher) => {
+                if let MatcherType::Status(_) = matcher {
+                    return self.matches_status(data.status_code);
+                }
+
+                let data = extractor_part_to_string(data, self.part);
+                match &matcher {
+                    MatcherType::DSL(dsls) => dsls
+                        .iter()
+                        .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
+                        .next(),
+                    MatcherType::Regex(regexes) => regexes
+                        .iter()
+                        .filter_map(|pattern| {
+                            regex_cache.match_group(
+                                *pattern,
+                                &data,
+                                self.group.unwrap_or(0) as usize,
+                            )
+                        })
+                        .next()
+                        .map(Value::String),
+                    MatcherType::Word(_) => {
+                        debug!("Extractor does not support Word matching");
+                        None
+                    }
+                    MatcherType::Status(_) => None,
+                }
+            }
+            ExtractorType::Kval(fields) => {
+                let cookies = extractor_get_cookies(data);
+                match self.part {
+                    ExtractorPart::Cookie | ExtractorPart::Header => {
+                        let kv = match self.part {
+                            ExtractorPart::Cookie => &cookies,
+                            ExtractorPart::Header => &data.headers,
+                            _ => unreachable!(),
+                        };
+                        for field in fields {
+                            if let Some((_, value)) = kv
+                                .iter()
+                                .find(|(k, _)| k.to_lowercase() == field.to_lowercase())
+                            {
+                                return Some(Value::String(value.clone()));
+                            }
+                        }
+                    }
+                    ExtractorPart::HeaderCookie => {
+                        for field in fields {
+                            for kv in [&data.headers, &cookies] {
+                                if let Some((_, value)) = kv
+                                    .iter()
+                                    .find(|(k, _)| k.to_lowercase() == field.to_lowercase())
+                                {
+                                    return Some(Value::String(value.clone()));
+                                }
+                            }
+                        }
+                    }
+                    _ => return None,
+                }
                 None
             }
-            MatcherType::Status(_) => None,
         }
     }
 
     fn matches_status(&self, status: u32) -> Option<Value> {
         match &self.r#type {
             // TODO: Maybe this should be different/Not implemented for Extractor
-            MatcherType::Status(_) => Some(Value::Int(status as i64)),
+            ExtractorType::Matcher(MatcherType::Status(_)) => Some(Value::Int(status as i64)),
             _ => unreachable!("Cannot match status when type != MatcherType::Status"),
         }
     }

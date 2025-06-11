@@ -709,8 +709,8 @@ where
                 let res = handle_op(*op, &mut stack);
                 if let Err(err) = res {
                     return {
-                        // TODO: return the err
-                        Err(())
+                        // TODO: proper err
+                        Err(err)
                     };
                 }
             }

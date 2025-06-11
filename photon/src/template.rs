@@ -49,6 +49,7 @@ pub enum ExtractorType {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ExtractorPart {
+    HeaderCookie, // Either Header or Cookie, with Header having priority
     Header,
     Cookie,
     // Response Parts
@@ -209,7 +210,10 @@ fn extractor_part_to_string(data: &HttpResponse, part: ExtractorPart) -> String 
         ExtractorPart::Response => response_to_string(data, ResponsePart::Response),
         ExtractorPart::Body => response_to_string(data, ResponsePart::Body),
         ExtractorPart::Raw => response_to_string(data, ResponsePart::Raw),
-        ExtractorPart::Header => response_to_string(data, ResponsePart::Header),
+        // Cookies are in Headers, so HeaderCookie maps to Headers string
+        ExtractorPart::Header | ExtractorPart::HeaderCookie => {
+            response_to_string(data, ResponsePart::Header)
+        }
 
         // Concatenated all cookie headers into a single string
         ExtractorPart::Cookie => data
@@ -328,6 +332,14 @@ impl Matcher {
 }
 
 impl Extractor {
+    // TODO: Allow multiple returns, with matchers being ran with all permutations
+    // of all possible extracted values? That's the logic according to testing with Nuclei
+    // where the matcher is ran like this pseudo logic:
+    // values.iter().any(|val| {
+    //    context.set(name, val)
+    //    matcher.matches(context)
+    //})
+    // if either matches, both values are added into the match
     pub fn extract(
         &self,
         data: &HttpResponse,
@@ -367,12 +379,35 @@ impl Extractor {
             }
             ExtractorType::Kval(fields) => {
                 let cookies = extractor_get_cookies(data);
-                // This seems to be the logic nuclei is using
-                // TODO: Verify that this is indeed the logic nuclei is using.
-                for field in fields {
-                    if let Some((_, value)) = cookies.iter().find(|(k, _)| k == field) {
-                        return Some(Value::String(value.clone()));
+                match self.part {
+                    ExtractorPart::Cookie | ExtractorPart::Header => {
+                        let kv = match self.part {
+                            ExtractorPart::Cookie => &cookies,
+                            ExtractorPart::Header => &data.headers,
+                            _ => unreachable!(),
+                        };
+                        for field in fields {
+                            if let Some((_, value)) = kv
+                                .iter()
+                                .find(|(k, _)| k.to_lowercase() == field.to_lowercase())
+                            {
+                                return Some(Value::String(value.clone()));
+                            }
+                        }
                     }
+                    ExtractorPart::HeaderCookie => {
+                        for field in fields {
+                            for kv in [&data.headers, &cookies] {
+                                if let Some((_, value)) = kv
+                                    .iter()
+                                    .find(|(k, _)| k.to_lowercase() == field.to_lowercase())
+                                {
+                                    return Some(Value::String(value.clone()));
+                                }
+                            }
+                        }
+                    }
+                    _ => return None,
                 }
                 None
             }

@@ -290,7 +290,7 @@ pub fn parse_extractor(
         Some(extractor_part) => {
             map_extractor_part(extractor_part).ok_or(TemplateError::InvalidValue("part".into()))?
         }
-        None => ExtractorPart::Header,
+        None => ExtractorPart::HeaderCookie,
     };
 
     let type_name = extractor_type.unwrap();

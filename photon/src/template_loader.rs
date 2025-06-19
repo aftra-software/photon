@@ -349,7 +349,7 @@ pub fn parse_matcher(
             None => Some(ResponsePart::Body),
         };
         if part_mat.is_none() {
-            // Mather part is not required if matcher type is DSL
+            // Matcher part is not required if matcher type is DSL
             // We also currently ignore missing parts if the match is optional either way
             if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::DSL(_)) {
                 return Ok(None);

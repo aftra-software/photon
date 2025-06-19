@@ -248,7 +248,7 @@ impl HttpReq {
         curl: &mut Easy2<Collector>,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let resp = curl_do_request(curl, options, &self, path, self.body.as_bytes());
+        let resp = curl_do_request(curl, options, self, path, self.body.as_bytes());
         if resp.is_some() {
             // Successful request
             *req_counter += 1;
@@ -325,7 +325,7 @@ impl HttpReq {
             headers.push(format!("{}: {}", header.name, val_str.unwrap()));
         }
 
-        let resp = curl_do_request(curl, options, &self, &path, body.as_bytes());
+        let resp = curl_do_request(curl, options, self, &path, body.as_bytes());
         if resp.is_some() {
             // Successful request
             *req_counter += 1;

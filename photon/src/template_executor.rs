@@ -9,7 +9,7 @@ use url::Url;
 
 use crate::{
     cache::{Cache, RegexCache},
-    init_functions,
+    get_config, init_functions,
     template::{Collector, Context, Template},
     template_loader::TemplateLoader,
     PhotonContext,
@@ -169,6 +169,7 @@ where
         }
 
         for (i, template) in self.templates.iter().enumerate().skip(from) {
+            debug!("Executing template {}", template.id);
             // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
             self.ctx.lock().unwrap().insert_str(
                 "randstr",

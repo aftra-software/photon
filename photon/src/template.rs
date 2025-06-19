@@ -1,5 +1,5 @@
 use core::str;
-use std::{rc::Rc, sync::Mutex};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     cache::{Cache, RegexCache},
@@ -116,7 +116,7 @@ pub struct HttpRequest {
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
-    pub parent: Option<Rc<Mutex<Context>>>,
+    pub parent: Option<Rc<RefCell<Context>>>,
 }
 
 impl Context {
@@ -138,7 +138,7 @@ impl Context {
 impl VariableContainer for Context {
     fn contains_key(&self, key: &str) -> bool {
         if let Some(parent) = &self.parent {
-            self.variables.contains_key(key) || parent.lock().unwrap().contains_key(key)
+            self.variables.contains_key(key) || parent.borrow().contains_key(key)
         } else {
             self.variables.contains_key(key)
         }
@@ -149,15 +149,7 @@ impl VariableContainer for Context {
             if self.variables.contains_key(key) {
                 Some(self.variables.get(key).unwrap().clone())
             } else {
-                Some(
-                    self.parent
-                        .as_ref()
-                        .unwrap()
-                        .lock()
-                        .unwrap()
-                        .get(key)
-                        .unwrap(),
-                )
+                Some(self.parent.as_ref().unwrap().borrow().get(key).unwrap())
             }
         } else {
             None
@@ -181,6 +173,7 @@ pub struct Template {
     pub info: Info,
     pub http: Vec<HttpRequest>,
     pub variables: Vec<(String, Value)>,
+    pub dsl_variables: Vec<String>, // DSL variables, lazily compiled
 }
 
 // TODO: MatchResult value from extractor (figure out how we want to handle that logic as well)
@@ -430,7 +423,7 @@ impl HttpRequest {
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
         regex_cache: &RegexCache,
-        parent_ctx: Rc<Mutex<Context>>,
+        parent_ctx: Rc<RefCell<Context>>,
         photon_context: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
@@ -476,8 +469,8 @@ impl HttpRequest {
                         {
                             // A bit clunky to safely mutate the shared parent of the current ctx
                             let tmp = ctx.parent.as_ref().unwrap().clone();
-                            let mut locked_parent = tmp.lock().unwrap();
-                            locked_parent.insert(extractor.name.as_ref().unwrap(), res);
+                            let mut parent = tmp.borrow_mut();
+                            parent.insert(extractor.name.as_ref().unwrap(), res);
                         }
                     }
                 }
@@ -547,7 +540,7 @@ impl Template {
         base_url: &str,
         options: &ExecutionOptions,
         curl: &mut Easy2<Collector>,
-        parent_ctx: Rc<Mutex<Context>>,
+        parent_ctx: Rc<RefCell<Context>>,
         photon_ctx: &PhotonContext, // TODO: we can move parent_ctx into here, options as well
         req_counter: &mut u32,
         cache: &mut Cache,
@@ -559,7 +552,7 @@ impl Template {
         K: Fn(&Template, Option<String>),
         C: Fn() -> bool,
     {
-        let ctx = Rc::from(Mutex::from(Context {
+        let ctx = Rc::from(RefCell::from(Context {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));

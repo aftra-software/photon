@@ -277,7 +277,6 @@ fn parse_matcher_type(
 
 pub fn parse_extractor(
     yaml: &Yaml,
-    matchers_condition: Condition,
     regex_cache: &mut RegexCache,
 ) -> Result<Extractor, TemplateError> {
     let extractor_part = yaml["part"].as_str();
@@ -460,7 +459,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         let extractors_parsed: Vec<_> = http_extractors
             .unwrap()
             .iter()
-            .map(|item| parse_extractor(item, matchers_condition, regex_cache))
+            .map(|item| parse_extractor(item, regex_cache))
             .collect();
         if extractors_parsed.iter().any(Result::is_err) {
             return Err(extractors_parsed
@@ -580,26 +579,29 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     })
 }
 
-fn parse_variables(yaml: &Yaml) -> Vec<(String, Value)> {
+fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<String>) {
     let mut variables = Vec::new();
+    let mut dsl_variables = Vec::new();
 
-    let hash = yaml.as_hash().unwrap();
+    let map = yaml.as_hash().unwrap();
 
-    for (k, v) in hash {
+    for (k, v) in map {
         if k.is_array() || v.is_array() {
             // TODO: Array support required in DSL
             continue;
         }
         let key = k.as_str().unwrap();
         let value = v.as_str().unwrap();
-        if get_bracket_pattern().is_match(value) {
-            // TODO: Store compiled expression for running right before template is executed
+        if let Some(captures) = get_bracket_pattern().captures(value) {
+            // We expect expressions in variables to be standalone
+            // If we ever find out that's not the case, we need to do the same as `bake_ctx` in http.rs
+            dsl_variables.push(String::from(captures.get(1).unwrap().as_str()));
         } else {
             variables.push((key.to_string(), Value::String(value.to_string())));
         }
     }
 
-    variables
+    (variables, dsl_variables)
 }
 
 pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Template, TemplateError> {
@@ -650,10 +652,10 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
 
     let http = http_parsed.into_iter().flatten().collect();
 
-    let variables = if template_yaml["variables"].is_hash() {
+    let (variables, dsl_variables) = if template_yaml["variables"].is_hash() {
         parse_variables(&template_yaml["variables"])
     } else {
-        vec![]
+        (vec![], vec![])
     };
 
     Ok(Template {
@@ -661,6 +663,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
         http,
         info,
         variables,
+        dsl_variables,
     })
 }
 

@@ -344,7 +344,6 @@ impl Matcher {
                 }
             }
             MatcherType::Word(words) => {
-                // TODO: match bracket && run DSL
                 if self.condition == Condition::OR {
                     words
                         .iter()

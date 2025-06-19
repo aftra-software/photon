@@ -579,7 +579,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     })
 }
 
-fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<String>) {
+fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<(String, String)>) {
     let mut variables = Vec::new();
     let mut dsl_variables = Vec::new();
 
@@ -595,7 +595,10 @@ fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<String>) {
         if let Some(captures) = get_bracket_pattern().captures(value) {
             // We expect expressions in variables to be standalone
             // If we ever find out that's not the case, we need to do the same as `bake_ctx` in http.rs
-            dsl_variables.push(String::from(captures.get(1).unwrap().as_str()));
+            dsl_variables.push((
+                key.to_string(),
+                String::from(captures.get(1).unwrap().as_str()),
+            ));
         } else {
             variables.push((key.to_string(), Value::String(value.to_string())));
         }

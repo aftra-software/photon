@@ -4,12 +4,15 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     cache::{Cache, RegexCache},
     get_config,
-    http::{HttpReq, HttpResponse},
+    http::{get_bracket_pattern, HttpReq, HttpResponse},
     template_executor::ExecutionOptions,
     PhotonContext,
 };
 use curl::easy::{Easy2, Handler, WriteError};
-use photon_dsl::dsl::{CompiledExpression, Value, VariableContainer};
+use photon_dsl::{
+    dsl::{CompiledExpression, Value, VariableContainer},
+    parser::compile_expression_validated,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy)]
@@ -173,7 +176,7 @@ pub struct Template {
     pub info: Info,
     pub http: Vec<HttpRequest>,
     pub variables: Vec<(String, Value)>,
-    pub dsl_variables: Vec<String>, // DSL variables, lazily compiled
+    pub dsl_variables: Vec<(String, String)>, // DSL variables, lazily compiled
 }
 
 // TODO: MatchResult value from extractor (figure out how we want to handle that logic as well)
@@ -267,6 +270,41 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
     }
 }
 
+fn contains_with_dsl(
+    haystack: &str,
+    needle: &str,
+    ctx: &Context,
+    photon_ctx: &PhotonContext,
+) -> bool {
+    // This can be made cleaner with Rust 2024 edition
+    // But that requires a newer compiler version than Rust 1.75!
+    if needle.starts_with("{{") {
+        if let Some(captures) = get_bracket_pattern().captures(needle) {
+            if let Ok(expr) = compile_expression_validated(
+                captures.get(1).unwrap().as_str(),
+                &photon_ctx.functions,
+            ) {
+                // Need to make sure not to hold an immutable borrow on ctx after executing
+                if let Ok(out) = expr.execute(ctx, &photon_ctx.functions) {
+                    haystack.contains(&out.to_string())
+                } else {
+                    false
+                }
+            } else {
+                debug!(
+                    "Failed to compile expression: {}",
+                    captures.get(1).unwrap().as_str()
+                );
+                false
+            }
+        } else {
+            haystack.contains(needle)
+        }
+    } else {
+        haystack.contains(needle)
+    }
+}
+
 impl Matcher {
     pub fn matches(
         &self,
@@ -306,10 +344,15 @@ impl Matcher {
                 }
             }
             MatcherType::Word(words) => {
+                // TODO: match bracket && run DSL
                 if self.condition == Condition::OR {
-                    words.iter().any(|needle| data.contains(needle))
+                    words
+                        .iter()
+                        .any(|needle| contains_with_dsl(&data, needle, context, photon_context))
                 } else {
-                    words.iter().all(|needle| data.contains(needle))
+                    words
+                        .iter()
+                        .all(|needle| contains_with_dsl(&data, needle, context, photon_context))
                 }
             }
             MatcherType::Status(_) => false,
@@ -534,6 +577,7 @@ impl Collector {
 
 impl Template {
     // TODO: Look into reducing the number of parameters
+    // e.g. Refactor TemplateExecutor to forward some ExecutorContext with execution info like options, context, caches etc
     // There's a lot of stuff we need to pass from a higher context into the templates & requests
     pub fn execute<K, C>(
         &self,
@@ -556,6 +600,19 @@ impl Template {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));
+        // TODO: compile, run and inject dsl_variables
+        for (key, value) in &self.dsl_variables {
+            if let Ok(expr) = compile_expression_validated(&value, &photon_ctx.functions) {
+                // Need to make sure not to hold an immutable borrow on ctx after executing
+                let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
+                if let Ok(res) = out {
+                    ctx.borrow_mut().insert(&key, res);
+                }
+            } else {
+                debug!("Failed to compile expression: {value}")
+            }
+        }
+
         for http in &self.http {
             // Check if we're supposed to continue scanning or not
             if continue_predicate.is_some() && !continue_predicate.as_ref().unwrap()() {

@@ -59,6 +59,17 @@ pub enum Value {
     // TODO: Add Array support
 }
 
+impl Value {
+    pub fn to_string(&self) -> String {
+        match &self {
+            Value::String(string) => string.clone(),
+            Value::Int(i) => format!("{i}"),
+            Value::Short(i) => format!("{i}"),
+            Value::Boolean(b) => format!("{b}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Bytecode {
     Instr(OPCode),

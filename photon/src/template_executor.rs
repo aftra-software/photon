@@ -1,6 +1,6 @@
 // Manages template execution state
 
-use std::{rc::Rc, sync::Mutex};
+use std::{cell::RefCell, rc::Rc};
 
 use curl::easy::Easy2;
 use rand::distributions::{Alphanumeric, DistString};
@@ -59,7 +59,7 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
-    ctx: Rc<Mutex<Context>>, // TODO: Mutex can likely just be a RefCell instead, unless multithreading using the same executor is really required.
+    ctx: Rc<RefCell<Context>>,
     photon_ctx: PhotonContext,
     total_reqs: u32,
     cache: Cache,
@@ -78,7 +78,7 @@ where
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
-            ctx: Rc::from(Mutex::from(Context {
+            ctx: Rc::from(RefCell::from(Context {
                 variables: FxHashMap::default(),
                 parent: None,
             })),
@@ -99,7 +99,7 @@ where
     // Usess more memory than `from` since it copies the TemplateLoader
     pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
         Self {
-            ctx: Rc::from(Mutex::from(Context {
+            ctx: Rc::from(RefCell::from(Context {
                 variables: FxHashMap::default(),
                 parent: None,
             })),
@@ -140,20 +140,20 @@ where
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
             let parsed: Result<Url, _> = base_url.parse();
+            let mut borrowed = self.ctx.borrow_mut();
             if let Ok(url) = parsed {
-                let mut locked: std::sync::MutexGuard<'_, Context> = self.ctx.lock().unwrap();
                 if let Some(port) = url.port_or_known_default() {
-                    locked.insert_int("Port", port as i64);
+                    borrowed.insert_int("Port", port as i64);
                     if let Some(host) = url.host_str() {
                         let hostname = format!("{host}:{port}");
-                        locked.insert_str("Hostname", &hostname);
+                        borrowed.insert_str("Hostname", &hostname);
                     }
                 }
                 if let Some(hostname) = url.host_str() {
-                    locked.insert_str("Host", hostname);
+                    borrowed.insert_str("Host", hostname);
                 }
-                locked.insert_str("Scheme", url.scheme());
-                locked.insert_str("Path", url.path());
+                borrowed.insert_str("Scheme", url.scheme());
+                borrowed.insert_str("Path", url.path());
             } else {
                 match parsed.err().unwrap() {
                     url::ParseError::RelativeUrlWithoutBase => {
@@ -164,25 +164,28 @@ where
             }
             // Base URL is the URL passed in, except documented as full url? but full url != base url
             // So for sanity sake we define Root and Base url as the same.
-            self.ctx.lock().unwrap().insert_str("BaseURL", base_url);
-            self.ctx.lock().unwrap().insert_str("RootURL", base_url);
+            borrowed.insert_str("BaseURL", base_url);
+            borrowed.insert_str("RootURL", base_url);
         }
 
         for (i, template) in self.templates.iter().enumerate().skip(from) {
             debug!("Executing template {}", template.id);
             // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
-            self.ctx.lock().unwrap().insert_str(
-                "randstr",
-                &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
-            );
-
-            // TODO: Do we want to support arbitrary many random strings?
-            // randstr_6 is the highest being used by any template
-            for i in 0..6 {
-                self.ctx.lock().unwrap().insert_str(
-                    &format!("randstr_{}", i + 1),
+            {
+                let mut borrowed = self.ctx.borrow_mut();
+                borrowed.insert_str(
+                    "randstr",
                     &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
                 );
+
+                // TODO: Do we want to support arbitrary many random strings?
+                // randstr_6 is the highest being used by any template
+                for i in 0..6 {
+                    borrowed.insert_str(
+                        &format!("randstr_{}", i + 1),
+                        &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
+                    );
+                }
             }
 
             let cont = template.execute(

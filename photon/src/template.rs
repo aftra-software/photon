@@ -360,7 +360,7 @@ impl Matcher {
 
     fn matches_status(&self, status: u32) -> bool {
         match &self.r#type {
-            MatcherType::Status(statuses) => statuses.iter().any(|s| *s == status),
+            MatcherType::Status(statuses) => statuses.contains(&status),
             _ => unreachable!("Cannot match status when type != MatcherType::Status"),
         }
     }
@@ -599,13 +599,12 @@ impl Template {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));
-        // TODO: compile, run and inject dsl_variables
         for (key, value) in &self.dsl_variables {
-            if let Ok(expr) = compile_expression_validated(&value, &photon_ctx.functions) {
+            if let Ok(expr) = compile_expression_validated(value, &photon_ctx.functions) {
                 // Need to make sure not to hold an immutable borrow on ctx after executing
                 let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
                 if let Ok(res) = out {
-                    ctx.borrow_mut().insert(&key, res);
+                    ctx.borrow_mut().insert(key, res);
                 }
             } else {
                 debug!("Failed to compile expression: {value}")
@@ -640,12 +639,9 @@ impl Template {
                     }
                 }
                 for name in unique_names {
-                    if name.is_empty() {
-                        if callback.is_some() {
-                            callback.as_ref().unwrap()(self, None);
-                        }
-                    } else if callback.is_some() {
-                        callback.as_ref().unwrap()(self, Some(name));
+                    let name = if name.is_empty() { None } else { Some(name) };
+                    if let Some(callback) = callback {
+                        callback(self, name)
                     }
                 }
             }

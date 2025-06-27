@@ -60,7 +60,7 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
         let mut updated = 0;
         for mat in matches.iter() {
             let compiled =
-                compile_expression_validated(&mat.get(1).unwrap().as_str(), &photon_ctx.functions);
+                compile_expression_validated(mat.get(1).unwrap().as_str(), &photon_ctx.functions);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(Value::String(ret)) = res {

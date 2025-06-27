@@ -105,7 +105,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         DslFunction::new(
             1,
             Box::new(|stack: &mut DSLStack| {
-                let inp = stack.pop_string()?;
+                let inp = stack.pop()?.to_string();
                 let hash = base16ct::lower::encode_string(&Md5::digest(inp));
                 Ok(Value::String(hash))
             }),

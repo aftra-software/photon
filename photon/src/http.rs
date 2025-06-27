@@ -49,7 +49,7 @@ pub struct HttpReq {
     pub max_redirects: Option<u32>,
 }
 
-fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
+pub(crate) fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
     let mut baked = inp.to_string();
     // TODO: Might be worth refactoring some of the code below.
     // Upper bound of 100 for bake_ctx, just to prevent any infinite-loops from self-creating expressions.
@@ -63,9 +63,9 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
                 compile_expression_validated(mat.get(1).unwrap().as_str(), &photon_ctx.functions);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
-                if let Ok(Value::String(ret)) = res {
+                if let Ok(ret) = res {
                     // Replace one at a time to prevent things like {{rand_int(0, 100)}} giving always the same result in two places.
-                    baked.replace_range(mat.get(0).unwrap().range(), &ret);
+                    baked.replace_range(mat.get(0).unwrap().range(), &ret.to_string());
                     updated += 1;
                     break;
                 }
@@ -79,11 +79,11 @@ fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<Stri
                     .map(|m| m.get(1).unwrap().as_str().to_string())
                     .collect::<HashSet<String>>();
                 verbose!(
-                    "Skipping request, {} missing parameters: [{}]",
+                    "Skipping, {} missing parameters: [{}]",
                     unique.len(),
                     unique.into_iter().collect::<Vec<String>>().join(", ")
                 );
-                return None; // There's more to match that we couldn't match, invalid request
+                return None;
             }
             break;
         }

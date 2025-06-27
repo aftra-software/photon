@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     cache::{Cache, RegexCache},
     get_config,
-    http::{get_bracket_pattern, HttpReq, HttpResponse},
+    http::{bake_ctx, get_bracket_pattern, HttpReq, HttpResponse},
     template_executor::ExecutionOptions,
     PhotonContext,
 };
@@ -277,24 +277,12 @@ fn contains_with_dsl(
     photon_ctx: &PhotonContext,
 ) -> bool {
     // This can be made cleaner with Rust 2024 edition
-    // But that requires a newer compiler version than Rust 1.75!
-    if needle.starts_with("{{") {
-        if let Some(captures) = get_bracket_pattern().captures(needle) {
-            if let Ok(expr) = compile_expression_validated(
-                captures.get(1).unwrap().as_str(),
-                &photon_ctx.functions,
-            ) {
-                // Need to make sure not to hold an immutable borrow on ctx after executing
-                if let Ok(out) = expr.execute(ctx, &photon_ctx.functions) {
-                    haystack.contains(&out.to_string())
-                } else {
-                    false
-                }
+    // But that requires Rust 1.88!
+    if needle.contains("{{") {
+        if get_bracket_pattern().is_match(needle) {
+            if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
+                haystack.contains(&baked.to_string())
             } else {
-                debug!(
-                    "Failed to compile expression: {}",
-                    captures.get(1).unwrap().as_str()
-                );
                 false
             }
         } else {

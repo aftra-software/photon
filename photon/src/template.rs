@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     cache::{Cache, RegexCache},
     get_config,
-    http::{get_bracket_pattern, HttpReq, HttpResponse},
+    http::{bake_ctx, get_bracket_pattern, HttpReq, HttpResponse},
     template_executor::ExecutionOptions,
     PhotonContext,
 };
@@ -277,24 +277,12 @@ fn contains_with_dsl(
     photon_ctx: &PhotonContext,
 ) -> bool {
     // This can be made cleaner with Rust 2024 edition
-    // But that requires a newer compiler version than Rust 1.75!
-    if needle.starts_with("{{") {
-        if let Some(captures) = get_bracket_pattern().captures(needle) {
-            if let Ok(expr) = compile_expression_validated(
-                captures.get(1).unwrap().as_str(),
-                &photon_ctx.functions,
-            ) {
-                // Need to make sure not to hold an immutable borrow on ctx after executing
-                if let Ok(out) = expr.execute(ctx, &photon_ctx.functions) {
-                    haystack.contains(&out.to_string())
-                } else {
-                    false
-                }
+    // But that requires Rust 1.88!
+    if needle.contains("{{") {
+        if get_bracket_pattern().is_match(needle) {
+            if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
+                haystack.contains(&baked.to_string())
             } else {
-                debug!(
-                    "Failed to compile expression: {}",
-                    captures.get(1).unwrap().as_str()
-                );
                 false
             }
         } else {
@@ -360,7 +348,7 @@ impl Matcher {
 
     fn matches_status(&self, status: u32) -> bool {
         match &self.r#type {
-            MatcherType::Status(statuses) => statuses.iter().any(|s| *s == status),
+            MatcherType::Status(statuses) => statuses.contains(&status),
             _ => unreachable!("Cannot match status when type != MatcherType::Status"),
         }
     }
@@ -599,13 +587,12 @@ impl Template {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
         }));
-        // TODO: compile, run and inject dsl_variables
         for (key, value) in &self.dsl_variables {
-            if let Ok(expr) = compile_expression_validated(&value, &photon_ctx.functions) {
+            if let Ok(expr) = compile_expression_validated(value, &photon_ctx.functions) {
                 // Need to make sure not to hold an immutable borrow on ctx after executing
                 let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
                 if let Ok(res) = out {
-                    ctx.borrow_mut().insert(&key, res);
+                    ctx.borrow_mut().insert(key, res);
                 }
             } else {
                 debug!("Failed to compile expression: {value}")
@@ -640,12 +627,9 @@ impl Template {
                     }
                 }
                 for name in unique_names {
-                    if name.is_empty() {
-                        if callback.is_some() {
-                            callback.as_ref().unwrap()(self, None);
-                        }
-                    } else if callback.is_some() {
-                        callback.as_ref().unwrap()(self, Some(name));
+                    let name = if name.is_empty() { None } else { Some(name) };
+                    if let Some(callback) = callback {
+                        callback(self, name)
                     }
                 }
             }

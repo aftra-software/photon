@@ -59,8 +59,8 @@ pub enum Value {
     // TODO: Add Array support
 }
 
-impl Value {
-    pub fn to_string(&self) -> String {
+impl ToString for Value {
+    fn to_string(&self) -> String {
         match &self {
             Value::String(string) => string.clone(),
             Value::Int(i) => format!("{i}"),

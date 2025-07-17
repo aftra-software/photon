@@ -108,10 +108,19 @@ pub struct Extractor {
     pub part: ExtractorPart,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum AttackMode {
+    Batteringram, // Default
+    Clusterbomb,
+    Pitchfork,
+}
+
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
     pub extractors: Vec<Extractor>,
     pub matchers: Vec<Matcher>,
+    pub payloads: FxHashMap<String, Vec<Value>>,
+    pub attack_mode: AttackMode,
     pub matchers_condition: Condition,
     pub path: Vec<HttpReq>,
 }

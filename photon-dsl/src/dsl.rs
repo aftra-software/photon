@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -59,14 +61,18 @@ pub enum Value {
     // TODO: Add Array support
 }
 
-impl ToString for Value {
-    fn to_string(&self) -> String {
-        match &self {
-            Value::String(string) => string.clone(),
-            Value::Int(i) => format!("{i}"),
-            Value::Short(i) => format!("{i}"),
-            Value::Boolean(b) => format!("{b}"),
-        }
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                Value::String(string) => string.clone(),
+                Value::Int(i) => format!("{i}"),
+                Value::Short(i) => format!("{i}"),
+                Value::Boolean(b) => format!("{b}"),
+            }
+        )
     }
 }
 
@@ -410,6 +416,10 @@ impl DSLStack {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn push(&mut self, val: Value) {
         self.inner.push(val);
     }
@@ -487,7 +497,7 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
                 }
                 Value::String(b) => {
                     let a = stack.pop_string()?;
-                    stack.push(Value::String(format!("{}{}", a, b)));
+                    stack.push(Value::String(format!("{a}{b}")));
                     Ok(())
                 }
                 _ => Err(()),

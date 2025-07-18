@@ -768,6 +768,20 @@ impl TemplateLoader {
         let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
         for template in &loaded_templates {
             for http in &template.http {
+                // TODO: Handle cache with payloads + attack
+                // preferably before merging in payloads at all!
+                if !http.payloads.is_empty() {
+                    continue;
+                }
+                // TODO: Validate that the cache isn't accidentally leaking
+                // responses between same looking paths, where the paths are
+                // different due to some DSL stuff
+                // e.g. two identical paths with {{randstr}} in different templates
+                // will have different random strings, thus possible inconsistency!
+                // Have two things to think about
+                // 1. paths where dsl variable depends on something, e.g. extractor etc
+                // 2. paths where dsl variables are declared in the template
+                //    but are either static or deterministic, e.g. {{md5("test")}} but not {{rand_int(1, 100)}}
                 for request in &http.path {
                     tokens
                         .entry(CacheKey(

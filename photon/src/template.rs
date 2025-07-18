@@ -456,6 +456,52 @@ impl Extractor {
 }
 
 impl HttpRequest {
+    fn handle_response(
+        &self,
+        resp: HttpResponse,
+        matches: &mut Vec<MatchResult>,
+        idx: usize,
+        ctx: &mut Context,
+        regex_cache: &RegexCache,
+        photon_context: &PhotonContext,
+    ) {
+        ctx.insert_str(&format!("body_{}", idx + 1), &resp.body);
+        ctx.insert_str("body", &resp.body);
+
+        // TODO: Should this be a Float?
+        ctx.insert_int("duration", resp.duration as i64);
+        ctx.insert_int(&format!("status_code_{}", idx + 1), resp.status_code as i64);
+        ctx.insert_int("status_code", resp.status_code as i64);
+        ctx.insert_str(
+            "header",
+            resp.headers
+                .iter()
+                .fold(String::with_capacity(512), |acc, hed| {
+                    format!("{acc}{}: {}\n", hed.0, hed.1)
+                })
+                .trim(),
+        );
+        for extractor in self.extractors.iter() {
+            if extractor.name.is_some() {
+                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_context) {
+                    // A bit clunky to safely mutate the shared parent of the current ctx
+                    let tmp = ctx.parent.as_ref().unwrap().clone();
+                    let mut parent = tmp.borrow_mut();
+                    parent.insert(extractor.name.as_ref().unwrap(), res);
+                }
+            }
+        }
+        for matcher in self.matchers.iter() {
+            // Negative XOR matches
+            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_context) {
+                matches.push(MatchResult {
+                    name: matcher.name.clone().unwrap_or("".to_string()),
+                    internal: matcher.internal,
+                });
+            }
+        }
+    }
+
     pub fn execute(
         &self,
         base_url: &str,
@@ -475,6 +521,8 @@ impl HttpRequest {
         };
 
         for (idx, req) in self.path.iter().enumerate() {
+            // TODO: possibly inline req.do_request into if let Some statement
+            // after function signatures are simplified with ExecutionContext changes
             let maybe_resp = req.do_request(
                 base_url,
                 options,
@@ -485,59 +533,29 @@ impl HttpRequest {
                 cache,
             );
             if let Some(resp) = maybe_resp {
-                ctx.insert_str(&format!("body_{}", idx + 1), &resp.body);
-                ctx.insert_str("body", &resp.body);
-
-                // TODO: Should this be a Float?
-                ctx.insert_int("duration", resp.duration as i64);
-                ctx.insert_int(&format!("status_code_{}", idx + 1), resp.status_code as i64);
-                ctx.insert_int("status_code", resp.status_code as i64);
-                ctx.insert_str(
-                    "header",
-                    resp.headers
-                        .iter()
-                        .fold(String::with_capacity(512), |acc, hed| {
-                            acc + &format!("{}: {}", hed.0, hed.1) + "\n"
-                        })
-                        .trim(),
+                self.handle_response(
+                    resp,
+                    &mut matches,
+                    idx,
+                    &mut ctx,
+                    regex_cache,
+                    photon_context,
                 );
-                for extractor in self.extractors.iter() {
-                    if extractor.name.is_some() {
-                        if let Some(res) =
-                            extractor.extract(&resp, regex_cache, &ctx, photon_context)
-                        {
-                            // A bit clunky to safely mutate the shared parent of the current ctx
-                            let tmp = ctx.parent.as_ref().unwrap().clone();
-                            let mut parent = tmp.borrow_mut();
-                            parent.insert(extractor.name.as_ref().unwrap(), res);
+
+                // Not the best logic, but should work?
+                match self.matchers_condition {
+                    Condition::AND => {
+                        if matches.len() == self.matchers.len() {
+                            return matches;
+                        } else {
+                            // Clear because all matchers need to match a single response
+                            matches.clear();
                         }
                     }
-                }
-                for matcher in self.matchers.iter() {
-                    // Negative XOR matches
-                    if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_context)
-                    {
-                        matches.push(MatchResult {
-                            name: matcher.name.clone().unwrap_or("".to_string()),
-                            internal: matcher.internal,
-                        });
-                    }
-                }
-            }
-
-            // Not the best logic, but should work?
-            match self.matchers_condition {
-                Condition::AND => {
-                    if matches.len() == self.matchers.len() {
-                        return matches;
-                    } else {
-                        // Clear because we want all matches to appear for 1 response
-                        matches.clear();
-                    }
-                }
-                Condition::OR => {
-                    if !matches.is_empty() {
-                        break;
+                    Condition::OR => {
+                        if !matches.is_empty() {
+                            break;
+                        }
                     }
                 }
             }
@@ -573,7 +591,7 @@ impl Collector {
 
 impl Template {
     // TODO: Look into reducing the number of parameters
-    // e.g. Refactor TemplateExecutor to forward some ExecutorContext with execution info like options, context, caches etc
+    // e.g. Refactor TemplateExecutor to forward some ExecutorContext with execution info like options, context, caches, request counter etc
     // There's a lot of stuff we need to pass from a higher context into the templates & requests
     pub fn execute<K, C>(
         &self,

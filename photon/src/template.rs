@@ -502,6 +502,83 @@ impl HttpRequest {
         }
     }
 
+    // Special case where we're doing an attack with some payload(s)
+    // TODO: probably some way to reduce duplicated code between execute and execute_attack
+    fn execute_attack(
+        &self,
+        base_url: &str,
+        options: &ExecutionOptions,
+        curl: &mut Easy2<Collector>,
+        regex_cache: &RegexCache,
+        parent_ctx: Rc<RefCell<Context>>,
+        photon_context: &PhotonContext,
+        req_counter: &mut u32,
+        cache: &mut Cache,
+    ) -> Vec<MatchResult> {
+        // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
+        let mut matches = Vec::new();
+        let mut ctx = Context {
+            variables: FxHashMap::default(),
+            parent: Some(parent_ctx),
+        };
+
+        if self.path.len() > 1 {
+            println!("paths: {} - {}", self.path.len(), self.payloads.len());
+            println!("{:?}", self.payloads);
+        }
+        // TODO: add upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
+
+        let attack_iter = match self.attack_mode {
+            AttackMode::Batteringram => {}
+            // TODO: possibly implement Clusterbomb properly, for now it's the same as Pitchfork
+            AttackMode::Clusterbomb => {}
+            AttackMode::Pitchfork => {}
+        };
+
+        for (idx, req) in self.path.iter().enumerate() {
+            // TODO: possibly inline req.do_request into if let Some statement
+            // after function signatures are simplified with ExecutionContext changes
+            let maybe_resp = req.do_request(
+                base_url,
+                options,
+                curl,
+                &ctx,
+                photon_context,
+                req_counter,
+                cache,
+            );
+            if let Some(resp) = maybe_resp {
+                self.handle_response(
+                    resp,
+                    &mut matches,
+                    idx,
+                    &mut ctx,
+                    regex_cache,
+                    photon_context,
+                );
+
+                // Not the best logic, but should work?
+                match self.matchers_condition {
+                    Condition::AND => {
+                        if matches.len() == self.matchers.len() {
+                            return matches;
+                        } else {
+                            // Clear because all matchers need to match a single response
+                            matches.clear();
+                        }
+                    }
+                    Condition::OR => {
+                        if !matches.is_empty() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        matches
+    }
+
     pub fn execute(
         &self,
         base_url: &str,
@@ -513,6 +590,19 @@ impl HttpRequest {
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Vec<MatchResult> {
+        if !self.payloads.is_empty() {
+            return self.execute_attack(
+                base_url,
+                options,
+                curl,
+                regex_cache,
+                parent_ctx,
+                photon_context,
+                req_counter,
+                cache,
+            );
+        }
+
         // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
         let mut matches = Vec::new();
         let mut ctx = Context {

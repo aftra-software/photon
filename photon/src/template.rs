@@ -108,6 +108,8 @@ pub struct Extractor {
     pub part: ExtractorPart,
 }
 
+type AttackPayloads = FxHashMap<String, Vec<Value>>;
+
 #[derive(Debug, Clone, Copy)]
 pub enum AttackMode {
     Batteringram, // Default
@@ -119,7 +121,7 @@ pub enum AttackMode {
 pub struct HttpRequest {
     pub extractors: Vec<Extractor>,
     pub matchers: Vec<Matcher>,
-    pub payloads: FxHashMap<String, Vec<Value>>,
+    pub payloads: AttackPayloads,
     pub attack_mode: AttackMode,
     pub matchers_condition: Condition,
     pub path: Vec<HttpReq>,
@@ -455,6 +457,50 @@ impl Extractor {
     }
 }
 
+struct AttackIterator<'a> {
+    inner: &'a AttackPayloads,
+    #[allow(unused)]
+    mode: AttackMode,
+    idx: usize,
+    stop_idx: usize,
+}
+
+impl<'a> AttackIterator<'a> {
+    fn new(inner: &'a AttackPayloads, mode: AttackMode) -> Self {
+        // TODO: Different logic for Clusterbomb
+        let stop_idx = inner.values().map(|values| values.len()).min().unwrap_or(0);
+
+        AttackIterator {
+            inner,
+            mode,
+            idx: 0,
+            stop_idx,
+        }
+    }
+}
+
+impl<'a> Iterator for AttackIterator<'a> {
+    type Item = Vec<(String, Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx == self.stop_idx {
+            return None;
+        }
+
+        self.idx += 1;
+
+        // TODO: Handle Clusterbomb differently later (all possible combinations of all parameters)
+        // Pitchfork and Batteringram behave the same, Batteringram is for 1 variable, Pitchfork for multiple
+        // So we implement them both in the exact same way.
+        let mut ret = Vec::with_capacity(4);
+        for (key, values) in self.inner {
+            ret.push((key.clone(), values[self.idx].clone()));
+        }
+
+        Some(ret)
+    }
+}
+
 impl HttpRequest {
     fn handle_response(
         &self,
@@ -528,48 +574,49 @@ impl HttpRequest {
         }
         // TODO: add upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
 
-        let attack_iter = match self.attack_mode {
-            AttackMode::Batteringram => {}
-            // TODO: possibly implement Clusterbomb properly, for now it's the same as Pitchfork
-            AttackMode::Clusterbomb => {}
-            AttackMode::Pitchfork => {}
-        };
+        let attack_iter = AttackIterator::new(&self.payloads, self.attack_mode);
 
-        for (idx, req) in self.path.iter().enumerate() {
-            // TODO: possibly inline req.do_request into if let Some statement
-            // after function signatures are simplified with ExecutionContext changes
-            let maybe_resp = req.do_request(
-                base_url,
-                options,
-                curl,
-                &ctx,
-                photon_context,
-                req_counter,
-                cache,
-            );
-            if let Some(resp) = maybe_resp {
-                self.handle_response(
-                    resp,
-                    &mut matches,
-                    idx,
-                    &mut ctx,
-                    regex_cache,
+        for attack_values in attack_iter {
+            for (key, value) in attack_values {
+                ctx.insert(&key, value);
+            }
+
+            for (idx, req) in self.path.iter().enumerate() {
+                // TODO: possibly inline req.do_request into if let Some statement
+                // after function signatures are simplified with ExecutionContext changes
+                let maybe_resp = req.do_request(
+                    base_url,
+                    options,
+                    curl,
+                    &ctx,
                     photon_context,
+                    req_counter,
+                    cache,
                 );
+                if let Some(resp) = maybe_resp {
+                    self.handle_response(
+                        resp,
+                        &mut matches,
+                        idx,
+                        &mut ctx,
+                        regex_cache,
+                        photon_context,
+                    );
 
-                // Not the best logic, but should work?
-                match self.matchers_condition {
-                    Condition::AND => {
-                        if matches.len() == self.matchers.len() {
-                            return matches;
-                        } else {
-                            // Clear because all matchers need to match a single response
-                            matches.clear();
+                    // Not the best logic, but should work?
+                    match self.matchers_condition {
+                        Condition::AND => {
+                            if matches.len() == self.matchers.len() {
+                                return matches;
+                            } else {
+                                // Clear because all matchers need to match a single response
+                                matches.clear();
+                            }
                         }
-                    }
-                    Condition::OR => {
-                        if !matches.is_empty() {
-                            break;
+                        Condition::OR => {
+                            if !matches.is_empty() {
+                                break;
+                            }
                         }
                     }
                 }

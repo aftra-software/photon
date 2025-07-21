@@ -459,20 +459,27 @@ impl Extractor {
 
 struct AttackIterator<'a> {
     inner: &'a AttackPayloads,
-    #[allow(unused)]
-    mode: AttackMode,
+    is_noop: bool,
     idx: usize,
     stop_idx: usize,
+    #[allow(unused)]
+    mode: AttackMode,
 }
 
 impl<'a> AttackIterator<'a> {
     fn new(inner: &'a AttackPayloads, mode: AttackMode) -> Self {
         // TODO: Different logic for Clusterbomb
-        let stop_idx = inner.values().map(|values| values.len()).min().unwrap_or(0);
+        let is_noop = inner.is_empty();
+        let stop_idx = if !is_noop {
+            inner.values().map(|values| values.len()).min().unwrap_or(0)
+        } else {
+            1 // Return empty vec for 1 iteration when not attacking
+        };
 
         AttackIterator {
             inner,
             mode,
+            is_noop: inner.is_empty(),
             idx: 0,
             stop_idx,
         }
@@ -489,15 +496,19 @@ impl<'a> Iterator for AttackIterator<'a> {
 
         self.idx += 1;
 
-        // TODO: Handle Clusterbomb differently later (all possible combinations of all parameters)
-        // Pitchfork and Batteringram behave the same, Batteringram is for 1 variable, Pitchfork for multiple
-        // So we implement them both in the exact same way.
-        let mut ret = Vec::with_capacity(4);
-        for (key, values) in self.inner {
-            ret.push((key.clone(), values[self.idx].clone()));
-        }
+        if self.is_noop {
+            Some(vec![])
+        } else {
+            // TODO: Handle Clusterbomb differently later (all possible combinations of all parameters)
+            // Pitchfork and Batteringram behave the same, Batteringram is for 1 variable, Pitchfork for multiple
+            // So we implement them both in the exact same way.
+            let mut ret = Vec::with_capacity(4);
+            for (key, values) in self.inner {
+                ret.push((key.clone(), values[self.idx].clone()));
+            }
 
-        Some(ret)
+            Some(ret)
+        }
     }
 }
 
@@ -548,9 +559,7 @@ impl HttpRequest {
         }
     }
 
-    // Special case where we're doing an attack with some payload(s)
-    // TODO: probably some way to reduce duplicated code between execute and execute_attack
-    fn execute_attack(
+    fn execute(
         &self,
         base_url: &str,
         options: &ExecutionOptions,
@@ -568,10 +577,11 @@ impl HttpRequest {
             parent: Some(parent_ctx),
         };
 
-        if self.path.len() > 1 {
+        if !self.payloads.is_empty() && self.path.len() > 1 {
             println!("paths: {} - {}", self.path.len(), self.payloads.len());
             println!("{:?}", self.payloads);
         }
+
         // TODO: add upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
 
         let attack_iter = AttackIterator::new(&self.payloads, self.attack_mode);
@@ -617,81 +627,6 @@ impl HttpRequest {
                             if !matches.is_empty() {
                                 break;
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        matches
-    }
-
-    pub fn execute(
-        &self,
-        base_url: &str,
-        options: &ExecutionOptions,
-        curl: &mut Easy2<Collector>,
-        regex_cache: &RegexCache,
-        parent_ctx: Rc<RefCell<Context>>,
-        photon_context: &PhotonContext,
-        req_counter: &mut u32,
-        cache: &mut Cache,
-    ) -> Vec<MatchResult> {
-        if !self.payloads.is_empty() {
-            return self.execute_attack(
-                base_url,
-                options,
-                curl,
-                regex_cache,
-                parent_ctx,
-                photon_context,
-                req_counter,
-                cache,
-            );
-        }
-
-        // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
-        let mut matches = Vec::new();
-        let mut ctx = Context {
-            variables: FxHashMap::default(),
-            parent: Some(parent_ctx),
-        };
-
-        for (idx, req) in self.path.iter().enumerate() {
-            // TODO: possibly inline req.do_request into if let Some statement
-            // after function signatures are simplified with ExecutionContext changes
-            let maybe_resp = req.do_request(
-                base_url,
-                options,
-                curl,
-                &ctx,
-                photon_context,
-                req_counter,
-                cache,
-            );
-            if let Some(resp) = maybe_resp {
-                self.handle_response(
-                    resp,
-                    &mut matches,
-                    idx,
-                    &mut ctx,
-                    regex_cache,
-                    photon_context,
-                );
-
-                // Not the best logic, but should work?
-                match self.matchers_condition {
-                    Condition::AND => {
-                        if matches.len() == self.matchers.len() {
-                            return matches;
-                        } else {
-                            // Clear because all matchers need to match a single response
-                            matches.clear();
-                        }
-                    }
-                    Condition::OR => {
-                        if !matches.is_empty() {
-                            break;
                         }
                     }
                 }

@@ -282,10 +282,9 @@ impl HttpReq {
         let mut req = httparse::Request::new(&mut headers);
         let parsed = req.parse(raw_data.as_bytes());
         if let Err(err) = parsed {
-            verbose!(
+            debug!(
                 "Error parsing raw request: {} - request: '{}'",
-                err,
-                raw_data
+                err, raw_data
             );
             return None;
         }
@@ -356,7 +355,7 @@ impl HttpReq {
         let path = path.trim().to_string();
 
         // Skip caching below if we know the request is only happening once
-        let key = CacheKey(self.method, self.headers.clone(), self.path.clone());
+        let key = CacheKey(self.method, self.headers.clone(), path.clone());
         if !cache.can_cache(&key) {
             let res = self.internal_request(&path, options, curl, req_counter);
             if let Some(resp) = res {

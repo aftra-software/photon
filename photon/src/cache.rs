@@ -31,6 +31,7 @@ impl Cache {
     }
 
     fn decrease_token(&mut self, key: &CacheKey) {
+        return;
         let tokens_left = self.current_tokens.get_mut(key).unwrap();
         if *tokens_left == 1 {
             // Final token, we know this cache key will never be accessed again until we reset
@@ -81,7 +82,7 @@ impl Cache {
     }
 
     pub fn can_cache(&self, key: &CacheKey) -> bool {
-        self.current_tokens.contains_key(key)
+        self.current_tokens.contains_key(key) || true
     }
 }
 

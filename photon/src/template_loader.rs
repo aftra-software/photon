@@ -795,11 +795,16 @@ impl TemplateLoader {
             }
         }
         let keys: Vec<CacheKey> = tokens.keys().cloned().collect();
+        let mut num_cached = 0;
         for key in keys {
-            if *tokens.get(&key).unwrap() == 1 {
+            let num_tokens = *tokens.get(&key).unwrap();
+            if num_tokens == 1 {
                 tokens.remove(&key);
             }
+            num_cached += num_tokens;
         }
+        verbose!("Cached requests: {num_cached}");
+
         let cache = Cache::new(tokens);
         regex_cache.finalize();
         Self {

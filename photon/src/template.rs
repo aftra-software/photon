@@ -494,9 +494,7 @@ impl<'a> Iterator for AttackIterator<'a> {
             return None;
         }
 
-        self.idx += 1;
-
-        if self.is_noop {
+        let ret = if self.is_noop {
             Some(vec![])
         } else {
             // TODO: Handle Clusterbomb differently later (all possible combinations of all parameters)
@@ -508,7 +506,11 @@ impl<'a> Iterator for AttackIterator<'a> {
             }
 
             Some(ret)
-        }
+        };
+
+        self.idx += 1;
+
+        ret
     }
 }
 

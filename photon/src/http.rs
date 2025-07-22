@@ -32,7 +32,7 @@ pub fn get_bracket_pattern() -> &'static Regex {
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct HttpResponse {
-    pub body: String,
+    pub body: Vec<u8>,
     pub headers: Vec<(String, String)>,
     pub status_code: u32,
     pub duration: f32,
@@ -211,7 +211,6 @@ fn curl_do_request(
     let duration = stopwatch.elapsed().as_secs_f32();
 
     let contents = curl.get_ref();
-    let body = String::from_utf8_lossy(&contents.0);
     let headers = parse_headers(&contents.1)?;
     debug!(
         "Got status {} for URL '{}', took {:.2}s",
@@ -219,10 +218,10 @@ fn curl_do_request(
         path,
         duration
     );
-    debug!("Body len: {}", body.len());
+    debug!("Body len: {}", contents.0.len());
 
     let resp = HttpResponse {
-        body: body.to_string(),
+        body: contents.0.clone(),
         status_code: curl.response_code().unwrap(),
         duration,
         headers,

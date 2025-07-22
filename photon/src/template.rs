@@ -259,10 +259,10 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
             data.headers
                 .iter()
                 .for_each(|(k, v)| parts.push(format!("{k}: {v}\n")));
-            parts.push(data.body.clone());
+            parts.push(String::from_utf8_lossy(&data.body).into());
             parts.concat()
         }
-        ResponsePart::Body => data.body.clone(),
+        ResponsePart::Body => String::from_utf8_lossy(&data.body).into(),
         ResponsePart::Header => data
             .headers
             .iter()
@@ -275,7 +275,7 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
             data.headers
                 .iter()
                 .for_each(|(k, v)| parts.push(format!("{k}: {v}\n")));
-            parts.push(data.body.clone());
+            parts.push(String::from_utf8_lossy(&data.body).into());
             parts.concat()
         }
     }
@@ -287,17 +287,11 @@ fn contains_with_dsl(
     ctx: &Context,
     photon_ctx: &PhotonContext,
 ) -> bool {
-    // This can be made cleaner with Rust 2024 edition
-    // But that requires Rust 1.88!
-    if needle.contains("{{") {
-        if get_bracket_pattern().is_match(needle) {
-            if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
-                haystack.contains(&baked.to_string())
-            } else {
-                false
-            }
+    if needle.contains("{{") && get_bracket_pattern().is_match(needle) {
+        if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
+            haystack.contains(&baked.to_string())
         } else {
-            haystack.contains(needle)
+            false
         }
     } else {
         haystack.contains(needle)
@@ -524,8 +518,11 @@ impl HttpRequest {
         regex_cache: &RegexCache,
         photon_context: &PhotonContext,
     ) {
-        ctx.insert_str(&format!("body_{}", idx + 1), &resp.body);
-        ctx.insert_str("body", &resp.body);
+        ctx.insert_str(
+            &format!("body_{}", idx + 1),
+            &String::from_utf8_lossy(&resp.body),
+        );
+        ctx.insert_str("body", &String::from_utf8_lossy(&resp.body));
 
         // TODO: Should this be a Float?
         ctx.insert_int("duration", resp.duration as i64);

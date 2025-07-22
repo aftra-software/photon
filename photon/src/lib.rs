@@ -20,12 +20,13 @@ pub mod template;
 pub mod template_executor;
 pub mod template_loader;
 
-use std::{sync::Mutex, time::Duration};
+use std::{io::Cursor, sync::Mutex, time::Duration};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use curl::easy::Easy;
 use itertools::Itertools;
 use md5::{Digest, Md5};
+use murmur3::murmur3_32;
 use photon_dsl::{
     dsl::{DSLStack, Value},
     DslFunction,
@@ -226,6 +227,17 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 }
 
                 Ok(Value::String(pythonic))
+            }),
+        ),
+    );
+    functions.insert(
+        "mmh3".into(), // MurMurHash3
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let hash_result = murmur3_32(&mut Cursor::new(inp), 0).map_err(|_| ())?;
+                Ok(Value::Int(hash_result as i64))
             }),
         ),
     );

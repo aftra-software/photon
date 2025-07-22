@@ -355,6 +355,7 @@ impl HttpReq {
         let path = path.trim().to_string();
 
         // Skip caching below if we know the request is only happening once
+        // XXX: Currently caches all requests, regardless of if their responses are re-used
         let key = CacheKey(self.method, self.headers.clone(), path.clone());
         if !cache.can_cache(&key) {
             let res = self.internal_request(&path, options, curl, req_counter);

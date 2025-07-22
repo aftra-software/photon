@@ -31,7 +31,6 @@ impl Cache {
     }
 
     fn decrease_token(&mut self, key: &CacheKey) {
-        return;
         let tokens_left = self.current_tokens.get_mut(key).unwrap();
         if *tokens_left == 1 {
             // Final token, we know this cache key will never be accessed again until we reset
@@ -53,7 +52,9 @@ impl Cache {
 
     pub fn get(&mut self, key: &CacheKey) -> Option<HttpResponse> {
         let ret = self.inner.get(key).unwrap().clone();
-        self.decrease_token(key);
+        // XXX: Tokens are currently used to determine if its likely a request
+        // repeated across multiple templates, thus we don't decrease currently
+        //self.decrease_token(key);
         if let Some(data) = ret {
             // Unwraps below should be 100% safe, since both bincode and compressed data are created by `store` function below.
             let decompressed = block::decompress(&data, None).unwrap();

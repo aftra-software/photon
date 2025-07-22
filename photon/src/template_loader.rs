@@ -284,7 +284,6 @@ pub fn parse_extractor(
     let extractor_name = yaml["name"].as_str();
     assert_fields(&[(extractor_type, "type")])?;
 
-    // TODO: Default extractor might be both Cookie + Header, so a secret third ExtractorPart
     let part = match extractor_part {
         Some(extractor_part) => {
             map_extractor_part(extractor_part).ok_or(TemplateError::InvalidValue("part".into()))?

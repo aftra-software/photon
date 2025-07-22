@@ -10,6 +10,7 @@ resolver = "2"
 opt-level = 1
 
 [profile.release]
+# Full LTO makes binary substantially smaller, due to some linking stuff
 lto = true
 strip = true
 panic = "abort"

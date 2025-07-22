@@ -190,7 +190,7 @@ pub struct Template {
     pub dsl_variables: Vec<(String, String)>, // DSL variables, lazily compiled
 }
 
-// TODO: MatchResult value from extractor (figure out how we want to handle that logic as well)
+// TODO: MatchResult values from extractors (figure out how we want to handle that logic as well)
 #[derive(Debug)]
 pub struct MatchResult {
     pub name: String,

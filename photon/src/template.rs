@@ -289,7 +289,7 @@ fn contains_with_dsl(
 ) -> bool {
     if needle.contains("{{") && get_bracket_pattern().is_match(needle) {
         if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
-            haystack.contains(&baked.to_string())
+            haystack.contains(&baked)
         } else {
             false
         }

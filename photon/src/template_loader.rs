@@ -40,11 +40,11 @@ fn load_yaml_from_file(file: &str) -> Result<Vec<Yaml>, TemplateError> {
         Err(_) => return Err(TemplateError::InvalidYaml),
     };
 
-    if parsed.len() != 1 {
-        return Err(TemplateError::InvalidYaml);
+    if parsed.len() == 1 {
+        Ok(parsed)
+    } else {
+        Err(TemplateError::InvalidYaml)
     }
-
-    Ok(parsed)
 }
 
 fn map_severity(severity: &str) -> Option<Severity> {
@@ -138,22 +138,20 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         None => String::new(),
     };
 
-    let severity = map_severity(info_severity.unwrap());
-    if severity.is_none() {
-        return Err(TemplateError::InvalidValue("Severity".into()));
-    }
+    let severity = match map_severity(info_severity.unwrap()) {
+        Some(severity) => severity,
+        None => {
+            return Err(TemplateError::InvalidValue("Severity".into()));
+        }
+    };
 
-    let references = if yaml["reference"].is_array() {
-        yaml["reference"]
-            .as_vec()
-            .unwrap()
+    let references = match &yaml["reference"] {
+        Yaml::Array(arr) => arr
             .iter()
             .map(|item| item.as_str().unwrap().to_string())
-            .collect()
-    } else if let Some(reference) = yaml["reference"].as_str() {
-        reference.split_terminator('\n').map(String::from).collect()
-    } else {
-        vec![]
+            .collect(),
+        Yaml::String(reference) => reference.split_terminator('\n').map(String::from).collect(),
+        _ => vec![],
     };
 
     let tags = match yaml["tags"].as_str() {
@@ -165,7 +163,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         name: info_name.unwrap().into(),
         author: info_author.unwrap().split(',').map(String::from).collect(),
         description,
-        severity: severity.unwrap(),
+        severity,
         reference: references,
         tags,
     })

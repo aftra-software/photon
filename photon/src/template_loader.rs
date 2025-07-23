@@ -239,15 +239,14 @@ fn parse_matcher_type(
             *regexes = patterns.unwrap()
         }
         MatcherType::Status(statuses) => {
-            let status_list = yaml["status"].as_vec();
-            if status_list.is_none() {
-                return Err(TemplateError::MissingField("status".into()));
-            }
-            let mut status_values: Vec<u32> = status_list
-                .unwrap()
-                .iter()
-                .map(|item| item.as_i64().unwrap() as u32)
-                .collect();
+            let mut status_values: Vec<u32> = match yaml["status"].as_vec() {
+                Some(list) => list
+                    .iter()
+                    .map(|item| item.as_i64().unwrap() as u32)
+                    .collect(),
+                None => return Err(TemplateError::MissingField("status".into())),
+            };
+
             statuses.append(&mut status_values);
         }
     }

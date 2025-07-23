@@ -576,12 +576,7 @@ impl HttpRequest {
             parent: Some(parent_ctx),
         };
 
-        if !self.payloads.is_empty() && self.path.len() > 1 {
-            println!("paths: {} - {}", self.path.len(), self.payloads.len());
-            println!("{:?}", self.payloads);
-        }
-
-        // TODO: add upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
+        // TODO: Might add an upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
 
         let attack_iter = AttackIterator::new(&self.payloads, self.attack_mode);
         let mut num_reqs = 0;
@@ -632,10 +627,6 @@ impl HttpRequest {
                     }
                 }
             }
-        }
-
-        if num_reqs > 5 {
-            println!("Loads of requests: {num_reqs}");
         }
 
         matches

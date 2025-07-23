@@ -304,7 +304,7 @@ impl Matcher {
         data: &HttpResponse,
         regex_cache: &RegexCache,
         context: &Context,
-        photon_context: &PhotonContext,
+        photon_ctx: &PhotonContext,
     ) -> bool {
         if let MatcherType::Status(_) = self.r#type {
             return self.matches_status(data.status_code);
@@ -315,12 +315,12 @@ impl Matcher {
             MatcherType::DSL(dsls) => {
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
-                        let res = expr.execute(&context, &photon_context.functions);
+                        let res = expr.execute(&context, &photon_ctx.functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 } else {
                     dsls.iter().all(|expr| {
-                        let res = expr.execute(&context, &photon_context.functions);
+                        let res = expr.execute(&context, &photon_ctx.functions);
                         res.is_ok() && (res.unwrap() == Value::Boolean(true))
                     })
                 }
@@ -340,11 +340,11 @@ impl Matcher {
                 if self.condition == Condition::OR {
                     words
                         .iter()
-                        .any(|needle| contains_with_dsl(&data, needle, context, photon_context))
+                        .any(|needle| contains_with_dsl(&data, needle, context, photon_ctx))
                 } else {
                     words
                         .iter()
-                        .all(|needle| contains_with_dsl(&data, needle, context, photon_context))
+                        .all(|needle| contains_with_dsl(&data, needle, context, photon_ctx))
                 }
             }
             MatcherType::Status(_) => false,
@@ -373,7 +373,7 @@ impl Extractor {
         data: &HttpResponse,
         regex_cache: &RegexCache,
         context: &Context,
-        photon_context: &PhotonContext,
+        photon_ctx: &PhotonContext,
     ) -> Option<Value> {
         match &self.r#type {
             ExtractorType::Matcher(matcher) => {
@@ -385,7 +385,7 @@ impl Extractor {
                 match &matcher {
                     MatcherType::DSL(dsls) => dsls
                         .iter()
-                        .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
+                        .filter_map(|expr| expr.execute(&context, &photon_ctx.functions).ok())
                         .next(),
                     MatcherType::Regex(regexes) => regexes
                         .iter()
@@ -515,7 +515,7 @@ impl HttpRequest {
         idx: usize,
         ctx: &mut Context,
         regex_cache: &RegexCache,
-        photon_context: &PhotonContext,
+        photon_ctx: &PhotonContext,
     ) -> Vec<MatchResult> {
         ctx.insert_str(
             &format!("body_{}", idx + 1),
@@ -538,7 +538,7 @@ impl HttpRequest {
         );
         for extractor in self.extractors.iter() {
             if extractor.name.is_some() {
-                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_context) {
+                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_ctx) {
                     // A bit clunky to safely mutate the shared parent of the current ctx
                     let tmp = ctx.parent.as_ref().unwrap().clone();
                     let mut parent = tmp.borrow_mut();
@@ -550,7 +550,7 @@ impl HttpRequest {
         let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
-            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_context) {
+            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
                 matches.push(MatchResult {
                     name: matcher.name.clone().unwrap_or("".to_string()),
                     internal: matcher.internal,

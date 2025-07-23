@@ -125,7 +125,6 @@ fn assert_fields<T>(fields: &[(Option<T>, &str)]) -> Result<(), TemplateError> {
 pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     let info_name = yaml["name"].as_str();
     let info_author = yaml["author"].as_str();
-    let info_description = yaml["description"].as_str();
     let info_severity = yaml["severity"].as_str();
 
     assert_fields(&[
@@ -134,10 +133,9 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         (info_severity, "severity"),
     ])?;
 
-    let description = if let Some(desc) = info_description {
-        desc.to_string()
-    } else {
-        String::new()
+    let description = match yaml["description"].as_str() {
+        Some(desc) => String::from(desc),
+        None => String::new(),
     };
 
     let severity = map_severity(info_severity.unwrap());
@@ -152,26 +150,20 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
             .iter()
             .map(|item| item.as_str().unwrap().to_string())
             .collect()
-    } else if yaml["reference"].as_str().is_some() {
-        yaml["reference"]
-            .as_str()
-            .unwrap()
-            .split_terminator('\n')
-            .map(|item| item.to_string())
-            .collect()
+    } else if let Some(reference) = yaml["reference"].as_str() {
+        reference.split_terminator('\n').map(String::from).collect()
     } else {
         vec![]
     };
 
-    let tags = if let Some(tags) = yaml["tags"].as_str() {
-        tags.split(',').map(String::from).collect()
-    } else {
-        vec![]
+    let tags = match yaml["tags"].as_str() {
+        Some(tags) => tags.split(',').map(String::from).collect(),
+        None => vec![],
     };
 
     Ok(Info {
         name: info_name.unwrap().into(),
-        author: info_author.unwrap().split(",").map(String::from).collect(),
+        author: info_author.unwrap().split(',').map(String::from).collect(),
         description,
         severity: severity.unwrap(),
         reference: references,

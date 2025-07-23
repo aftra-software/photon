@@ -2,6 +2,7 @@ use core::str;
 use std::{
     collections::HashSet,
     ffi::CStr,
+    mem,
     sync::OnceLock,
     time::{Duration, Instant},
 };
@@ -210,18 +211,19 @@ fn curl_do_request(
 
     let duration = stopwatch.elapsed().as_secs_f32();
 
-    let contents = curl.get_ref();
-    let headers = parse_headers(&contents.1)?;
     debug!(
         "Got status {} for URL '{}', took {:.2}s",
         curl.response_code().unwrap(),
         path,
         duration
     );
+
+    let contents = curl.get_mut();
+    let headers = parse_headers(&contents.1)?;
     debug!("Body len: {}", contents.0.len());
 
     let resp = HttpResponse {
-        body: contents.0.clone(),
+        body: mem::take(&mut contents.0),
         status_code: curl.response_code().unwrap(),
         duration,
         headers,

@@ -164,18 +164,14 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     };
 
     let tags = if let Some(tags) = yaml["tags"].as_str() {
-        tags.split(',').map(|item| String::from(item)).collect()
+        tags.split(',').map(String::from).collect()
     } else {
         vec![]
     };
 
     Ok(Info {
         name: info_name.unwrap().into(),
-        author: info_author
-            .unwrap()
-            .split(",")
-            .map(|author| String::from(author))
-            .collect(),
+        author: info_author.unwrap().split(",").map(String::from).collect(),
         description,
         severity: severity.unwrap(),
         reference: references,

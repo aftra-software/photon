@@ -163,15 +163,10 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         vec![]
     };
 
-    let tags = if yaml["tags"].is_badvalue() {
-        vec![]
+    let tags = if let Some(tags) = yaml["tags"].as_str() {
+        tags.split(',').map(|item| String::from(item)).collect()
     } else {
-        yaml["tags"]
-            .as_str()
-            .unwrap()
-            .split(',')
-            .map(|item| item.to_string())
-            .collect()
+        vec![]
     };
 
     Ok(Info {

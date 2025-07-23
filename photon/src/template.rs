@@ -579,7 +579,6 @@ impl HttpRequest {
         // TODO: Might add an upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
 
         let attack_iter = AttackIterator::new(&self.payloads, self.attack_mode);
-        let mut num_reqs = 0;
         for attack_values in attack_iter {
             for (key, value) in attack_values {
                 // TODO: for Value::String values, put them through bake_ctx, since some templates contain DSL things in payloads
@@ -599,7 +598,6 @@ impl HttpRequest {
                     cache,
                 );
                 if let Some(resp) = maybe_resp {
-                    num_reqs += 1;
                     self.handle_response(
                         resp,
                         &mut matches,

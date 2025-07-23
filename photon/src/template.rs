@@ -512,12 +512,11 @@ impl HttpRequest {
     fn handle_response(
         &self,
         resp: HttpResponse,
-        matches: &mut Vec<MatchResult>,
         idx: usize,
         ctx: &mut Context,
         regex_cache: &RegexCache,
         photon_context: &PhotonContext,
-    ) {
+    ) -> Vec<MatchResult> {
         ctx.insert_str(
             &format!("body_{}", idx + 1),
             &String::from_utf8_lossy(&resp.body),
@@ -547,6 +546,8 @@ impl HttpRequest {
                 }
             }
         }
+
+        let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
             if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_context) {
@@ -556,7 +557,59 @@ impl HttpRequest {
                 });
             }
         }
+        matches
     }
+
+    fn all_payload_contexts(
+        &self,
+        parent_ctx: Rc<RefCell<Context>>,
+    ) -> impl Iterator<Item = Context> + use<'_> {
+        AttackIterator::new(&self.payloads, self.attack_mode).map(move |attack_values| {
+            let mut ctx = Context {
+                variables: FxHashMap::default(),
+                parent: Some(parent_ctx.clone()),
+            };
+            for (key, value) in attack_values {
+                // TODO: for Value::String values, put them through bake_ctx, since some templates contain DSL things in payloads
+                ctx.insert(&key, value);
+            }
+            ctx
+        })
+    }
+
+    /*
+    fn all_payload_contexts(&self, ...) -> impl Iterator<Item = Context> {
+        AttackIterator::new(...).map(|...| {
+            let mut ctx = Context { parent: ... };
+            for ... {
+            ctx.insert(...);
+            }
+            ctx
+        })
+    }
+
+    fn execute_single_request(&self, ...) -> Option<Vec<MatcherResult>> {
+        let resp = req.do_request(...)?;
+        let matchers_result = self.handle_response(resp, ...);
+
+        matchers_result.succeeded() // bool
+            .then(|| matchers_result.0)
+    }
+
+    fn execute(&self, ...) -> Option<Vec<MatchResult>> {
+        let payload_contexts = self.all_payload_contexts(...);
+
+        for context in payload_contexts {
+            for (idx, req) in self.path.iter().enumerate {
+            if let Some(matches) = self.execute_single_request(...) {
+                return Some(matches);
+            }
+            }
+        }
+
+        None
+    }
+    */
 
     fn execute(
         &self,
@@ -570,7 +623,6 @@ impl HttpRequest {
         cache: &mut Cache,
     ) -> Vec<MatchResult> {
         // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
-        let mut matches = Vec::new();
         let mut ctx = Context {
             variables: FxHashMap::default(),
             parent: Some(parent_ctx),
@@ -598,28 +650,19 @@ impl HttpRequest {
                     cache,
                 );
                 if let Some(resp) = maybe_resp {
-                    self.handle_response(
-                        resp,
-                        &mut matches,
-                        idx,
-                        &mut ctx,
-                        regex_cache,
-                        photon_context,
-                    );
+                    let matches =
+                        self.handle_response(resp, idx, &mut ctx, regex_cache, photon_context);
 
                     // Not the best logic, but should work?
                     match self.matchers_condition {
                         Condition::AND => {
                             if matches.len() == self.matchers.len() {
                                 return matches;
-                            } else {
-                                // Clear because all matchers need to match a single response
-                                matches.clear();
                             }
                         }
                         Condition::OR => {
                             if !matches.is_empty() {
-                                break;
+                                return matches;
                             }
                         }
                     }
@@ -627,7 +670,7 @@ impl HttpRequest {
             }
         }
 
-        matches
+        vec![]
     }
 }
 

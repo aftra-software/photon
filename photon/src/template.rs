@@ -552,7 +552,7 @@ impl HttpRequest {
             // Negative XOR matches
             if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
                 matches.push(MatchResult {
-                    name: matcher.name.clone().unwrap_or("".to_string()),
+                    name: matcher.name.clone().unwrap_or(String::new()),
                     internal: matcher.internal,
                 });
             }

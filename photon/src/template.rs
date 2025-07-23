@@ -81,7 +81,7 @@ pub enum Condition {
 #[derive(Debug, Clone)]
 pub struct Info {
     pub name: String,
-    pub author: String,
+    pub author: Vec<String>,
     pub description: String,
     pub severity: Severity,
     pub reference: Vec<String>,

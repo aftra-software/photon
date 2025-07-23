@@ -176,7 +176,11 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
 
     Ok(Info {
         name: info_name.unwrap().into(),
-        author: info_author.unwrap().into(),
+        author: info_author
+            .unwrap()
+            .split(",")
+            .map(|author| String::from(author))
+            .collect(),
         description,
         severity: severity.unwrap(),
         reference: references,

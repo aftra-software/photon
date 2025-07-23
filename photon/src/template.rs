@@ -577,39 +577,39 @@ impl HttpRequest {
         })
     }
 
-    /*
-    fn all_payload_contexts(&self, ...) -> impl Iterator<Item = Context> {
-        AttackIterator::new(...).map(|...| {
-            let mut ctx = Context { parent: ... };
-            for ... {
-            ctx.insert(...);
-            }
-            ctx
-        })
-    }
+    fn execute_single_request(
+        &self,
+        idx: usize,
+        req: &HttpReq,
+        base_url: &str,
+        options: &ExecutionOptions,
+        curl: &mut Easy2<Collector>,
+        ctx: &mut Context,
+        photon_ctx: &PhotonContext,
+        req_counter: &mut u32,
+        cache: &mut Cache,
+        regex_cache: &RegexCache,
+    ) -> Option<Vec<MatchResult>> {
+        let resp = req.do_request(base_url, options, curl, ctx, photon_ctx, req_counter, cache)?;
+        let matchers_result = self.handle_response(resp, idx, ctx, regex_cache, photon_ctx);
 
-    fn execute_single_request(&self, ...) -> Option<Vec<MatcherResult>> {
-        let resp = req.do_request(...)?;
-        let matchers_result = self.handle_response(resp, ...);
-
-        matchers_result.succeeded() // bool
-            .then(|| matchers_result.0)
-    }
-
-    fn execute(&self, ...) -> Option<Vec<MatchResult>> {
-        let payload_contexts = self.all_payload_contexts(...);
-
-        for context in payload_contexts {
-            for (idx, req) in self.path.iter().enumerate {
-            if let Some(matches) = self.execute_single_request(...) {
-                return Some(matches);
-            }
+        if !matchers_result.is_empty() {
+            match self.matchers_condition {
+                Condition::AND => {
+                    if matchers_result.len() == self.matchers.len() {
+                        return Some(matchers_result);
+                    }
+                }
+                Condition::OR => {
+                    if !matchers_result.is_empty() {
+                        return Some(matchers_result);
+                    }
+                }
             }
         }
 
         None
     }
-    */
 
     fn execute(
         &self,
@@ -618,54 +618,27 @@ impl HttpRequest {
         curl: &mut Easy2<Collector>,
         regex_cache: &RegexCache,
         parent_ctx: Rc<RefCell<Context>>,
-        photon_context: &PhotonContext,
+        photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Vec<MatchResult> {
-        // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
-        let mut ctx = Context {
-            variables: FxHashMap::default(),
-            parent: Some(parent_ctx),
-        };
+        let payload_contexts = self.all_payload_contexts(parent_ctx);
 
-        // TODO: Might add an upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
-
-        let attack_iter = AttackIterator::new(&self.payloads, self.attack_mode);
-        for attack_values in attack_iter {
-            for (key, value) in attack_values {
-                // TODO: for Value::String values, put them through bake_ctx, since some templates contain DSL things in payloads
-                ctx.insert(&key, value);
-            }
-
+        for mut context in payload_contexts {
             for (idx, req) in self.path.iter().enumerate() {
-                // TODO: possibly inline req.do_request into if let Some statement
-                // after function signatures are simplified with ExecutionContext changes
-                let maybe_resp = req.do_request(
+                if let Some(matches) = self.execute_single_request(
+                    idx,
+                    req,
                     base_url,
                     options,
                     curl,
-                    &ctx,
-                    photon_context,
+                    &mut context,
+                    photon_ctx,
                     req_counter,
                     cache,
-                );
-                if let Some(resp) = maybe_resp {
-                    let matches =
-                        self.handle_response(resp, idx, &mut ctx, regex_cache, photon_context);
-
-                    // Not the best logic, but should work?
-                    match self.matchers_condition {
-                        Condition::AND => {
-                            if matches.len() == self.matchers.len() {
-                                return matches;
-                            }
-                        }
-                        Condition::OR => {
-                            if !matches.is_empty() {
-                                return matches;
-                            }
-                        }
-                    }
+                    regex_cache,
+                ) {
+                    return matches;
                 }
             }
         }

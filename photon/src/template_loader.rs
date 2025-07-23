@@ -140,9 +140,7 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
 
     let severity = match map_severity(info_severity.unwrap()) {
         Some(severity) => severity,
-        None => {
-            return Err(TemplateError::InvalidValue("Severity".into()));
-        }
+        None => return Err(TemplateError::InvalidValue("Severity".into())),
     };
 
     let references = match &yaml["reference"] {
@@ -188,11 +186,10 @@ fn parse_matcher_type(
             words.append(&mut words_strings);
         }
         MatcherType::DSL(dsls) => {
-            let dsl_list = yaml["dsl"].as_vec();
-            if dsl_list.is_none() {
-                return Err(TemplateError::MissingField("dsl".into()));
-            }
-            let dsl_list = dsl_list.unwrap();
+            let dsl_list = match yaml["dsl"].as_vec() {
+                Some(list) => list,
+                None => return Err(TemplateError::MissingField("dsl".into())),
+            };
             let mut dsl_strings: Vec<CompiledExpression> = dsl_list
                 .iter()
                 .flat_map(|item| compile_expression(item.as_str().unwrap()))
@@ -215,15 +212,13 @@ fn parse_matcher_type(
             dsls.append(&mut dsl_strings);
         }
         MatcherType::Regex(regexes) => {
-            let regex_list = yaml["regex"].as_vec();
-            if regex_list.is_none() {
-                return Err(TemplateError::MissingField("regex".into()));
-            }
-            let regex_strings: Vec<String> = regex_list
-                .unwrap()
-                .iter()
-                .map(|item| item.as_str().unwrap().to_string())
-                .collect();
+            let regex_strings: Vec<String> = match yaml["regex"].as_vec() {
+                Some(regexes) => regexes
+                    .iter()
+                    .map(|item| item.as_str().unwrap().to_string())
+                    .collect(),
+                None => return Err(TemplateError::MissingField("regex".into())),
+            };
 
             let patterns: Result<Vec<u32>, _> = regex_strings
                 .iter()

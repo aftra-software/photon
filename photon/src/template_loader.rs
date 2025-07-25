@@ -13,7 +13,9 @@ use crate::{
     get_config,
     http::{get_bracket_pattern, HttpReq},
     matcher::{Extractor, ExtractorPart, ExtractorType, Matcher, MatcherType, ResponsePart},
-    template::{AttackMode, Condition, HttpRequest, Info, Method, Severity, Template},
+    template::{
+        AttackMode, Classification, Condition, HttpRequest, Info, Method, Severity, Template,
+    },
 };
 
 #[derive(Debug)]

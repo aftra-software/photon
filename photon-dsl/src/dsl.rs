@@ -63,16 +63,12 @@ pub enum Value {
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match &self {
-                Value::String(string) => string.clone(),
-                Value::Int(i) => format!("{i}"),
-                Value::Short(i) => format!("{i}"),
-                Value::Boolean(b) => format!("{b}"),
-            }
-        )
+        match &self {
+            Value::String(string) => write!(f, "{string}"),
+            Value::Int(i) => write!(f, "{i}"),
+            Value::Short(i) => write!(f, "{i}"),
+            Value::Boolean(b) => write!(f, "{b}"),
+        }
     }
 }
 

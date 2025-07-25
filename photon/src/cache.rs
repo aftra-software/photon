@@ -83,7 +83,10 @@ impl Cache {
     }
 
     pub fn can_cache(&self, key: &CacheKey) -> bool {
-        self.current_tokens.contains_key(key) || true
+        //self.current_tokens.contains_key(key)
+
+        // XXX: Always return true for now, while the caching implementation caches all requests
+        true
     }
 }
 

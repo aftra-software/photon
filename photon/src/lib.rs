@@ -16,6 +16,7 @@ macro_rules! verbose {
 
 mod cache;
 mod http;
+mod matcher;
 pub mod template;
 pub mod template_executor;
 pub mod template_loader;

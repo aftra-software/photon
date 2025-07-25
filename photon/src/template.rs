@@ -4,13 +4,13 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     cache::{Cache, RegexCache},
     get_config,
-    http::{bake_ctx, get_bracket_pattern, HttpReq, HttpResponse},
+    http::{CurlHandle, HttpReq, HttpResponse},
+    matcher::{Extractor, Matcher},
     template_executor::ExecutionOptions,
     PhotonContext,
 };
-use curl::easy::{Easy2, Handler, WriteError};
 use photon_dsl::{
-    dsl::{CompiledExpression, Value, VariableContainer},
+    dsl::{Value, VariableContainer},
     parser::compile_expression_validated,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -34,41 +34,6 @@ pub enum Method {
     PATCH,
     DELETE,
     OPTIONS,
-}
-
-#[derive(Debug, Clone)]
-pub enum MatcherType {
-    Word(Vec<String>),
-    DSL(Vec<CompiledExpression>),
-    Regex(Vec<u32>), // indicies into RegexCache
-    Status(Vec<u32>),
-}
-
-#[derive(Debug, Clone)]
-pub enum ExtractorType {
-    Matcher(MatcherType),
-    Kval(Vec<String>),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ExtractorPart {
-    HeaderCookie, // Either Header or Cookie, with Header having priority
-    Header,
-    Cookie,
-    // Response Parts
-    Body,
-    Raw,
-    All,
-    Response, // Seems to be an alias for All, https://github.com/projectdiscovery/nuclei/blob/dev/SYNTAX-REFERENCE.md#httprequest
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ResponsePart {
-    Body,
-    Raw,
-    Header,
-    All,
-    Response, // Seems to be an alias for All, https://github.com/projectdiscovery/nuclei/blob/dev/SYNTAX-REFERENCE.md#httprequest
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,26 +61,6 @@ pub struct Info {
     pub severity: Severity,
     pub reference: Vec<String>,
     pub tags: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Matcher {
-    pub r#type: MatcherType,
-    pub name: Option<String>,
-    pub negative: bool,
-    pub group: Option<i64>, // Regex group number, None represents entire regex match
-    pub internal: bool,     // Used for workflows, matches, but does not print
-    pub part: ResponsePart,
-    pub condition: Condition,
-}
-
-#[derive(Debug, Clone)]
-pub struct Extractor {
-    pub r#type: ExtractorType,
-    pub name: Option<String>,
-    pub group: Option<i64>, // Regex group number, None represents entire regex match
-    pub internal: bool,     // Used for workflows, matches, but does not print
-    pub part: ExtractorPart,
 }
 
 type AttackPayloads = FxHashMap<String, Vec<Value>>;
@@ -220,247 +165,6 @@ impl Severity {
     }
 }
 
-fn extractor_part_to_string(data: &HttpResponse, part: ExtractorPart) -> String {
-    match part {
-        // Map 1:1 Extractor -> Response parts
-        ExtractorPart::All => response_to_string(data, ResponsePart::All),
-        ExtractorPart::Response => response_to_string(data, ResponsePart::Response),
-        ExtractorPart::Body => response_to_string(data, ResponsePart::Body),
-        ExtractorPart::Raw => response_to_string(data, ResponsePart::Raw),
-        // Cookies are in Headers, so HeaderCookie maps to Headers string
-        ExtractorPart::Header | ExtractorPart::HeaderCookie => {
-            response_to_string(data, ResponsePart::Header)
-        }
-
-        // Concatenated all cookie headers into a single string
-        ExtractorPart::Cookie => data
-            .headers
-            .iter()
-            .filter(|(key, _)| key.to_lowercase() == "set-cookie")
-            .map(|(_, value)| format!("{value}\n"))
-            .collect::<Vec<String>>()
-            .concat(),
-    }
-}
-
-// Get (Key, Value) pairs from cookies
-fn extractor_get_cookies(data: &HttpResponse) -> Vec<(String, String)> {
-    data.headers
-        .iter()
-        .filter(|(key, _)| key.to_lowercase() == "set-cookie")
-        .filter_map(|(_, value)| {
-            let cookie_kv = value.split(';').next().unwrap().split_once('=');
-            if let Some((key, value)) = cookie_kv {
-                // https://docs.projectdiscovery.io/templates/reference/extractors#kval-extractor
-                // Nuclei kval extractors don't support dashes, so we modify the key to conform to their spec
-                Some((String::from(key).replace('-', "_"), String::from(value)))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<(String, String)>>()
-}
-
-fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
-    match part {
-        ResponsePart::All | ResponsePart::Response => {
-            // TODO: Actually return proper All, now easier using CURL
-            let mut parts = vec![];
-            data.headers
-                .iter()
-                .for_each(|(k, v)| parts.push(format!("{k}: {v}\n")));
-            parts.push(String::from_utf8_lossy(&data.body).into());
-            parts.concat()
-        }
-        ResponsePart::Body => String::from_utf8_lossy(&data.body).into(),
-        ResponsePart::Header => data
-            .headers
-            .iter()
-            .map(|(k, v)| format!("{k}: {v}\n"))
-            .collect::<Vec<String>>()
-            .concat(),
-        ResponsePart::Raw => {
-            // TODO: Actually return Raw
-            let mut parts = vec![];
-            data.headers
-                .iter()
-                .for_each(|(k, v)| parts.push(format!("{k}: {v}\n")));
-            parts.push(String::from_utf8_lossy(&data.body).into());
-            parts.concat()
-        }
-    }
-}
-
-fn contains_with_dsl(
-    haystack: &str,
-    needle: &str,
-    ctx: &Context,
-    photon_ctx: &PhotonContext,
-) -> bool {
-    if needle.contains("{{") && get_bracket_pattern().is_match(needle) {
-        if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
-            haystack.contains(&baked.to_string())
-        } else {
-            false
-        }
-    } else {
-        haystack.contains(needle)
-    }
-}
-
-impl Matcher {
-    pub fn matches(
-        &self,
-        data: &HttpResponse,
-        regex_cache: &RegexCache,
-        context: &Context,
-        photon_context: &PhotonContext,
-    ) -> bool {
-        if let MatcherType::Status(_) = self.r#type {
-            return self.matches_status(data.status_code);
-        }
-
-        let data = response_to_string(data, self.part);
-        match &self.r#type {
-            MatcherType::DSL(dsls) => {
-                if self.condition == Condition::OR {
-                    dsls.iter().any(|expr| {
-                        let res = expr.execute(&context, &photon_context.functions);
-                        res.is_ok() && (res.unwrap() == Value::Boolean(true))
-                    })
-                } else {
-                    dsls.iter().all(|expr| {
-                        let res = expr.execute(&context, &photon_context.functions);
-                        res.is_ok() && (res.unwrap() == Value::Boolean(true))
-                    })
-                }
-            }
-            MatcherType::Regex(regexes) => {
-                if self.condition == Condition::OR {
-                    regexes
-                        .iter()
-                        .any(|pattern| regex_cache.matches(*pattern, &data))
-                } else {
-                    regexes
-                        .iter()
-                        .all(|pattern| regex_cache.matches(*pattern, &data))
-                }
-            }
-            MatcherType::Word(words) => {
-                if self.condition == Condition::OR {
-                    words
-                        .iter()
-                        .any(|needle| contains_with_dsl(&data, needle, context, photon_context))
-                } else {
-                    words
-                        .iter()
-                        .all(|needle| contains_with_dsl(&data, needle, context, photon_context))
-                }
-            }
-            MatcherType::Status(_) => false,
-        }
-    }
-
-    fn matches_status(&self, status: u32) -> bool {
-        match &self.r#type {
-            MatcherType::Status(statuses) => statuses.contains(&status),
-            _ => unreachable!("Cannot match status when type != MatcherType::Status"),
-        }
-    }
-}
-
-impl Extractor {
-    // TODO: Allow multiple returns, with matchers being ran with all permutations
-    // of all possible extracted values? That's the logic according to testing with Nuclei
-    // where the matcher is ran like this pseudo logic:
-    // values.iter().any(|val| {
-    //    context.set(name, val)
-    //    matcher.matches(context)
-    //})
-    // if either matches, both values are added into the match
-    pub fn extract(
-        &self,
-        data: &HttpResponse,
-        regex_cache: &RegexCache,
-        context: &Context,
-        photon_context: &PhotonContext,
-    ) -> Option<Value> {
-        match &self.r#type {
-            ExtractorType::Matcher(matcher) => {
-                if let MatcherType::Status(_) = matcher {
-                    return self.matches_status(data.status_code);
-                }
-
-                let data = extractor_part_to_string(data, self.part);
-                match &matcher {
-                    MatcherType::DSL(dsls) => dsls
-                        .iter()
-                        .filter_map(|expr| expr.execute(&context, &photon_context.functions).ok())
-                        .next(),
-                    MatcherType::Regex(regexes) => regexes
-                        .iter()
-                        .filter_map(|pattern| {
-                            regex_cache.match_group(
-                                *pattern,
-                                &data,
-                                self.group.unwrap_or(0) as usize,
-                            )
-                        })
-                        .next()
-                        .map(Value::String),
-                    MatcherType::Word(_) => {
-                        debug!("Extractor does not support Word matching");
-                        None
-                    }
-                    MatcherType::Status(_) => None,
-                }
-            }
-            ExtractorType::Kval(fields) => {
-                let cookies = extractor_get_cookies(data);
-                match self.part {
-                    ExtractorPart::Cookie | ExtractorPart::Header => {
-                        let kv = match self.part {
-                            ExtractorPart::Cookie => &cookies,
-                            ExtractorPart::Header => &data.headers,
-                            _ => unreachable!(),
-                        };
-                        for field in fields {
-                            if let Some((_, value)) = kv
-                                .iter()
-                                .find(|(k, _)| k.to_lowercase() == field.to_lowercase())
-                            {
-                                return Some(Value::String(value.clone()));
-                            }
-                        }
-                    }
-                    ExtractorPart::HeaderCookie => {
-                        for field in fields {
-                            for kv in [&data.headers, &cookies] {
-                                if let Some((_, value)) = kv
-                                    .iter()
-                                    .find(|(k, _)| k.to_lowercase() == field.to_lowercase())
-                                {
-                                    return Some(Value::String(value.clone()));
-                                }
-                            }
-                        }
-                    }
-                    _ => return None,
-                }
-                None
-            }
-        }
-    }
-
-    fn matches_status(&self, status: u32) -> Option<Value> {
-        match &self.r#type {
-            // TODO: Maybe this should be different/Not implemented for Extractor
-            ExtractorType::Matcher(MatcherType::Status(_)) => Some(Value::Int(status as i64)),
-            _ => unreachable!("Cannot match status when type != MatcherType::Status"),
-        }
-    }
-}
-
 struct AttackIterator<'a> {
     inner: &'a AttackPayloads,
     is_noop: bool,
@@ -522,12 +226,11 @@ impl HttpRequest {
     fn handle_response(
         &self,
         resp: HttpResponse,
-        matches: &mut Vec<MatchResult>,
         idx: usize,
         ctx: &mut Context,
         regex_cache: &RegexCache,
-        photon_context: &PhotonContext,
-    ) {
+        photon_ctx: &PhotonContext,
+    ) -> Vec<MatchResult> {
         ctx.insert_str(
             &format!("body_{}", idx + 1),
             &String::from_utf8_lossy(&resp.body),
@@ -549,7 +252,7 @@ impl HttpRequest {
         );
         for extractor in self.extractors.iter() {
             if extractor.name.is_some() {
-                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_context) {
+                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_ctx) {
                     // A bit clunky to safely mutate the shared parent of the current ctx
                     let tmp = ctx.parent.as_ref().unwrap().clone();
                     let mut parent = tmp.borrow_mut();
@@ -557,113 +260,105 @@ impl HttpRequest {
                 }
             }
         }
+
+        let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
-            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_context) {
+            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
                 matches.push(MatchResult {
-                    name: matcher.name.clone().unwrap_or("".to_string()),
+                    name: matcher.name.clone().unwrap_or(String::new()),
                     internal: matcher.internal,
                 });
             }
         }
+        matches
+    }
+
+    fn all_payload_contexts(
+        &self,
+        parent_ctx: Rc<RefCell<Context>>,
+    ) -> impl Iterator<Item = Context> + use<'_> {
+        AttackIterator::new(&self.payloads, self.attack_mode).map(move |attack_values| {
+            let mut ctx = Context {
+                variables: FxHashMap::default(),
+                parent: Some(parent_ctx.clone()),
+            };
+            for (key, value) in attack_values {
+                // TODO: for Value::String values, put them through bake_ctx, since some templates contain DSL things in payloads
+                ctx.insert(&key, value);
+            }
+            ctx
+        })
+    }
+
+    fn execute_single_request(
+        &self,
+        idx: usize,
+        req: &HttpReq,
+        base_url: &str,
+        options: &ExecutionOptions,
+        curl: &mut CurlHandle,
+        ctx: &mut Context,
+        photon_ctx: &PhotonContext,
+        req_counter: &mut u32,
+        cache: &mut Cache,
+        regex_cache: &RegexCache,
+    ) -> Option<Vec<MatchResult>> {
+        let resp = req.do_request(base_url, options, curl, ctx, photon_ctx, req_counter, cache)?;
+        let matchers_result = self.handle_response(resp, idx, ctx, regex_cache, photon_ctx);
+
+        if !matchers_result.is_empty() {
+            match self.matchers_condition {
+                Condition::AND => {
+                    if matchers_result.len() == self.matchers.len() {
+                        return Some(matchers_result);
+                    }
+                }
+                Condition::OR => {
+                    if !matchers_result.is_empty() {
+                        return Some(matchers_result);
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     fn execute(
         &self,
         base_url: &str,
         options: &ExecutionOptions,
-        curl: &mut Easy2<Collector>,
+        curl: &mut CurlHandle,
         regex_cache: &RegexCache,
         parent_ctx: Rc<RefCell<Context>>,
-        photon_context: &PhotonContext,
+        photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
     ) -> Vec<MatchResult> {
-        // TODO: Handle stop at first match logic, currently we stop requesting after we match first http response
-        let mut matches = Vec::new();
-        let mut ctx = Context {
-            variables: FxHashMap::default(),
-            parent: Some(parent_ctx),
-        };
+        let payload_contexts = self.all_payload_contexts(parent_ctx);
 
-        // TODO: Might add an upper limit to amount of requests to send, don't want a single template doing hundreds of requests!
-
-        let attack_iter = AttackIterator::new(&self.payloads, self.attack_mode);
-        let mut num_reqs = 0;
-        for attack_values in attack_iter {
-            for (key, value) in attack_values {
-                // TODO: for Value::String values, put them through bake_ctx, since some templates contain DSL things in payloads
-                ctx.insert(&key, value);
-            }
-
+        for mut context in payload_contexts {
             for (idx, req) in self.path.iter().enumerate() {
-                // TODO: possibly inline req.do_request into if let Some statement
-                // after function signatures are simplified with ExecutionContext changes
-                let maybe_resp = req.do_request(
+                // Signature will become nicer once ExecutorContext refactoring is done
+                if let Some(matches) = self.execute_single_request(
+                    idx,
+                    req,
                     base_url,
                     options,
                     curl,
-                    &ctx,
-                    photon_context,
+                    &mut context,
+                    photon_ctx,
                     req_counter,
                     cache,
-                );
-                if let Some(resp) = maybe_resp {
-                    num_reqs += 1;
-                    self.handle_response(
-                        resp,
-                        &mut matches,
-                        idx,
-                        &mut ctx,
-                        regex_cache,
-                        photon_context,
-                    );
-
-                    // Not the best logic, but should work?
-                    match self.matchers_condition {
-                        Condition::AND => {
-                            if matches.len() == self.matchers.len() {
-                                return matches;
-                            } else {
-                                // Clear because all matchers need to match a single response
-                                matches.clear();
-                            }
-                        }
-                        Condition::OR => {
-                            if !matches.is_empty() {
-                                break;
-                            }
-                        }
-                    }
+                    regex_cache,
+                ) {
+                    return matches;
                 }
             }
         }
 
-        matches
-    }
-}
-
-pub struct Collector(pub Vec<u8>, pub Vec<u8>);
-
-impl Handler for Collector {
-    fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
-        self.0.extend_from_slice(data);
-        Ok(data.len())
-    }
-
-    fn header(&mut self, data: &[u8]) -> bool {
-        // Make sure we're appending headers only, curl also gives us the HTTP response code header as well for some reason
-        if data.contains(&b':') {
-            self.1.extend_from_slice(data);
-        }
-        true
-    }
-}
-
-impl Collector {
-    pub fn reset(&mut self) {
-        self.0.clear();
-        self.1.clear();
+        vec![]
     }
 }
 
@@ -675,7 +370,7 @@ impl Template {
         &self,
         base_url: &str,
         options: &ExecutionOptions,
-        curl: &mut Easy2<Collector>,
+        curl: &mut CurlHandle,
         parent_ctx: Rc<RefCell<Context>>,
         photon_ctx: &PhotonContext, // TODO: we can move parent_ctx into here, options as well
         req_counter: &mut u32,

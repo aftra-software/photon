@@ -12,10 +12,8 @@ use crate::{
     cache::{Cache, CacheKey, RegexCache},
     get_config,
     http::{get_bracket_pattern, HttpReq},
-    template::{
-        AttackMode, Classification, Condition, Extractor, ExtractorPart, ExtractorType,
-        HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity, Template,
-    },
+    matcher::{Extractor, ExtractorPart, ExtractorType, Matcher, MatcherType, ResponsePart},
+    template::{AttackMode, Condition, HttpRequest, Info, Method, Severity, Template},
 };
 
 #[derive(Debug)]

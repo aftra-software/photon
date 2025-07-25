@@ -2,12 +2,13 @@ use core::str;
 use std::{
     collections::HashSet,
     ffi::CStr,
+    mem,
     sync::OnceLock,
     time::{Duration, Instant},
 };
 
 use bincode::{Decode, Encode};
-use curl::easy::{Easy2, List};
+use curl::easy::{Easy2, Handler, List, WriteError};
 use curl_sys::CURLOPT_CUSTOMREQUEST;
 use httparse::Status;
 use photon_dsl::{
@@ -19,7 +20,7 @@ use regex::Regex;
 use crate::{
     cache::{Cache, CacheKey},
     get_config,
-    template::{Collector, Context, Method},
+    template::{Context, Method},
     template_executor::ExecutionOptions,
     PhotonContext,
 };
@@ -110,9 +111,34 @@ fn parse_headers(contents: &[u8]) -> Option<Vec<(String, String)>> {
         })
         .collect()
 }
+pub struct Collector(pub Vec<u8>, pub Vec<u8>);
+
+impl Handler for Collector {
+    fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+        self.0.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn header(&mut self, data: &[u8]) -> bool {
+        // Make sure we're appending headers only, curl also gives us the HTTP response code header as well for some reason
+        if data.contains(&b':') {
+            self.1.extend_from_slice(data);
+        }
+        true
+    }
+}
+
+impl Collector {
+    pub fn reset(&mut self) {
+        self.0.clear();
+        self.1.clear();
+    }
+}
+
+pub(crate) type CurlHandle = Easy2<Collector>;
 
 fn curl_do_request(
-    curl: &mut Easy2<Collector>,
+    curl: &mut CurlHandle,
     options: &ExecutionOptions,
     req: &HttpReq,
     path: &str,
@@ -210,18 +236,19 @@ fn curl_do_request(
 
     let duration = stopwatch.elapsed().as_secs_f32();
 
-    let contents = curl.get_ref();
-    let headers = parse_headers(&contents.1)?;
     debug!(
         "Got status {} for URL '{}', took {:.2}s",
         curl.response_code().unwrap(),
         path,
         duration
     );
+
+    let contents = curl.get_mut();
+    let headers = parse_headers(&contents.1)?;
     debug!("Body len: {}", contents.0.len());
 
     let resp = HttpResponse {
-        body: contents.0.clone(),
+        body: mem::take(&mut contents.0),
         status_code: curl.response_code().unwrap(),
         duration,
         headers,
@@ -244,7 +271,7 @@ impl HttpReq {
         &self,
         path: &str,
         options: &ExecutionOptions,
-        curl: &mut Easy2<Collector>,
+        curl: &mut CurlHandle,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
         let resp = curl_do_request(curl, options, self, path, self.body.as_bytes());
@@ -261,7 +288,7 @@ impl HttpReq {
         ctx: &Context,
         photon_ctx: &PhotonContext,
         options: &ExecutionOptions,
-        curl: &mut Easy2<Collector>,
+        curl: &mut CurlHandle,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
         let mut raw_data = self.bake_raw(ctx, photon_ctx)?;
@@ -335,7 +362,7 @@ impl HttpReq {
         &self,
         base_url: &str,
         options: &ExecutionOptions,
-        curl: &mut Easy2<Collector>,
+        curl: &mut CurlHandle,
         ctx: &Context,
         photon_ctx: &PhotonContext,
         req_counter: &mut u32,

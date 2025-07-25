@@ -13,8 +13,8 @@ use crate::{
     get_config,
     http::{get_bracket_pattern, HttpReq},
     template::{
-        AttackMode, Condition, Extractor, ExtractorPart, ExtractorType, HttpRequest, Info, Matcher,
-        MatcherType, Method, ResponsePart, Severity, Template,
+        AttackMode, Classification, Condition, Extractor, ExtractorPart, ExtractorType,
+        HttpRequest, Info, Matcher, MatcherType, Method, ResponsePart, Severity, Template,
     },
 };
 
@@ -122,7 +122,39 @@ fn assert_fields<T>(fields: &[(Option<T>, &str)]) -> Result<(), TemplateError> {
     Ok(())
 }
 
-pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
+fn parse_classification(yaml: &Yaml) -> Option<Classification> {
+    if yaml.is_badvalue() {
+        return None;
+    }
+
+    let cve_id = match yaml["cve-id"].as_vec() {
+        Some(vec) => vec
+            .iter()
+            .map(|item| item.as_str().unwrap().to_string())
+            .collect(),
+        None => vec![],
+    };
+    let cwe_id = match yaml["cwe-id"].as_vec() {
+        Some(vec) => vec
+            .iter()
+            .map(|item| item.as_str().unwrap().to_string())
+            .collect(),
+        None => vec![],
+    };
+    let cvss_metrics = yaml["cvss-metrics"]
+        .as_str()
+        .map(|metrics| metrics.to_string());
+    let cvss_score = yaml["cvss-score"].as_f64();
+
+    Some(Classification {
+        cve_id,
+        cwe_id,
+        cvss_metrics,
+        cvss_score,
+    })
+}
+
+fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     let info_name = yaml["name"].as_str();
     let info_author = yaml["author"].as_str();
     let info_severity = yaml["severity"].as_str();
@@ -138,12 +170,14 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         None => String::new(),
     };
 
+    let remediation = yaml["remediation"].as_str().map(|rem| rem.to_string());
+
     let severity = match map_severity(info_severity.unwrap()) {
         Some(severity) => severity,
         None => return Err(TemplateError::InvalidValue("Severity".into())),
     };
 
-    let references = match &yaml["reference"] {
+    let reference = match &yaml["reference"] {
         Yaml::Array(arr) => arr
             .iter()
             .map(|item| item.as_str().unwrap().to_string())
@@ -157,12 +191,16 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         None => vec![],
     };
 
+    let classification = parse_classification(&yaml["classification"]);
+
     Ok(Info {
         name: info_name.unwrap().into(),
         author: info_author.unwrap().split(',').map(String::from).collect(),
         description,
+        remediation,
         severity,
-        reference: references,
+        classification,
+        reference,
         tags,
     })
 }

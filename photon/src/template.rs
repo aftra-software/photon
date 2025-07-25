@@ -79,10 +79,20 @@ pub enum Condition {
 }
 
 #[derive(Debug, Clone)]
+pub struct Classification {
+    pub cve_id: Vec<String>,
+    pub cwe_id: Vec<String>,
+    pub cvss_metrics: Option<String>,
+    pub cvss_score: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Info {
     pub name: String,
     pub author: Vec<String>,
     pub description: String,
+    pub remediation: Option<String>,
+    pub classification: Option<Classification>,
     pub severity: Severity,
     pub reference: Vec<String>,
     pub tags: Vec<String>,

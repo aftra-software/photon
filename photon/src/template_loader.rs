@@ -144,7 +144,13 @@ fn parse_classification(yaml: &Yaml) -> Option<Classification> {
         _ => vec![],
     };
     let cvss_metrics = yaml["cvss-metrics"].as_str().map(String::from);
-    let cvss_score = yaml["cvss-score"].as_f64();
+    let cvss_score = if let Some(score) = yaml["cvss-score"].as_f64() {
+        Some(score)
+    } else if let Some(score) = yaml["cvss-score"].as_i64() {
+        Some(score as f64)
+    } else {
+        None
+    };
 
     // Only return Classification if any of it's recognized fields are set
     if cvss_metrics.is_some() || cvss_score.is_some() || !cve_id.is_empty() || cwe_id.is_empty() {
@@ -838,12 +844,12 @@ mod tests {
 
     use crate::{template::Template, template_loader::TemplateLoader};
 
-    fn find_template<'a>(templates: &'a TemplateLoader, name: &str) -> &'a Template {
+    fn find_template<'a>(templates: &'a TemplateLoader, id: &str) -> &'a Template {
         let templ = templates
             .loaded_templates
             .iter()
-            .find(|templ| templ.id == name);
-        assert!(templ.is_some(), "Couldn't find template {}", name);
+            .find(|templ| templ.id == id);
+        assert!(templ.is_some(), "Couldn't find template {}", id);
 
         templ.unwrap()
     }
@@ -852,7 +858,6 @@ mod tests {
     fn load_test_templates() {
         // Test is ran inside photon sub-folder, so we go up one folder to find test templates
         let templates = TemplateLoader::load_from_path("../test-templates");
-
         assert!(templates.len() == 5);
 
         let cve_template = find_template(&templates, "CVE-2015-7297");
@@ -872,5 +877,20 @@ mod tests {
                 == Some(String::from("CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P"))
         );
         assert!(classification.cvss_score == Some(7.5));
+    }
+
+    #[test]
+    fn test_classification() {
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        let phpmyadmin_templ = find_template(&templates, "kval-test");
+        assert!(phpmyadmin_templ.info.classification.is_some());
+        let classification = phpmyadmin_templ.info.classification.as_ref().unwrap();
+        assert!(classification.cve_id == Vec::<String>::new());
+        assert!(classification.cwe_id == vec![String::from("CWE-200")]);
+        assert!(
+            classification.cvss_metrics
+                == Some(String::from("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"))
+        );
+        assert!(classification.cvss_score == Some(0.0));
     }
 }

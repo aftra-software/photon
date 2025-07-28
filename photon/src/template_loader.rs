@@ -144,12 +144,17 @@ fn parse_classification(yaml: &Yaml) -> Option<Classification> {
     let cvss_metrics = yaml["cvss-metrics"].as_str().map(String::from);
     let cvss_score = yaml["cvss-score"].as_f64();
 
-    Some(Classification {
-        cve_id,
-        cwe_id,
-        cvss_metrics,
-        cvss_score,
-    })
+    // Only return Classification if any of it's recognized fields are set
+    if cvss_metrics.is_some() || cvss_score.is_some() || !cve_id.is_empty() || cwe_id.is_empty() {
+        Some(Classification {
+            cve_id,
+            cwe_id,
+            cvss_metrics,
+            cvss_score,
+        })
+    } else {
+        None
+    }
 }
 
 fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {

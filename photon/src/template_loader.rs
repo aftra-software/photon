@@ -884,6 +884,7 @@ mod tests {
         let templates = TemplateLoader::load_from_path("../test-templates");
         let phpmyadmin_templ = find_template(&templates, "kval-test");
         assert!(phpmyadmin_templ.info.classification.is_some());
+
         let classification = phpmyadmin_templ.info.classification.as_ref().unwrap();
         assert!(classification.cve_id == Vec::<String>::new());
         assert!(classification.cwe_id == vec![String::from("CWE-200")]);
@@ -892,5 +893,8 @@ mod tests {
                 == Some(String::from("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"))
         );
         assert!(classification.cvss_score == Some(0.0));
+
+        let dsl_templ = find_template(&templates, "dsl-variable-test");
+        assert!(dsl_templ.info.classification.is_none());
     }
 }

@@ -831,3 +831,46 @@ impl TemplateLoader {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use photon_dsl::dsl::Value;
+
+    use crate::{template::Template, template_loader::TemplateLoader};
+
+    fn find_template<'a>(templates: &'a TemplateLoader, name: &str) -> &'a Template {
+        let templ = templates
+            .loaded_templates
+            .iter()
+            .find(|templ| templ.id == name);
+        assert!(templ.is_some(), "Couldn't find template {}", name);
+
+        templ.unwrap()
+    }
+
+    #[test]
+    fn load_test_templates() {
+        // Test is ran inside photon sub-folder, so we go up one folder to find test templates
+        let templates = TemplateLoader::load_from_path("../test-templates");
+
+        assert!(templates.len() == 5);
+
+        let cve_template = find_template(&templates, "CVE-2015-7297");
+        assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);
+
+        let info = &cve_template.info;
+        assert!(info.name == "Joomla! Core SQL Injection");
+        assert!(info.description == "A SQL injection vulnerability in Joomla! 3.2 before 3.4.4 allows remote attackers to execute arbitrary SQL commands.");
+        assert!(info.author == vec![String::from("princechaddha")]);
+        assert!(info.classification.is_some());
+
+        let classification = info.classification.as_ref().unwrap();
+        assert!(classification.cve_id == vec![String::from("CVE-2015-7297")]);
+        assert!(classification.cwe_id == vec![String::from("CWE-89")]);
+        assert!(
+            classification.cvss_metrics
+                == Some(String::from("CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P"))
+        );
+        assert!(classification.cvss_score == Some(7.5));
+    }
+}

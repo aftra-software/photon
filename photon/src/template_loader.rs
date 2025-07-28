@@ -141,9 +141,7 @@ fn parse_classification(yaml: &Yaml) -> Option<Classification> {
             .collect(),
         None => vec![],
     };
-    let cvss_metrics = yaml["cvss-metrics"]
-        .as_str()
-        .map(|metrics| metrics.to_string());
+    let cvss_metrics = yaml["cvss-metrics"].as_str().map(String::from);
     let cvss_score = yaml["cvss-score"].as_f64();
 
     Some(Classification {
@@ -166,7 +164,7 @@ fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     ])?;
 
     let description = match yaml["description"].as_str() {
-        Some(desc) => String::from(desc),
+        Some(desc) => String::from(desc.trim()),
         None => String::new(),
     };
 

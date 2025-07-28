@@ -127,19 +127,21 @@ fn parse_classification(yaml: &Yaml) -> Option<Classification> {
         return None;
     }
 
-    let cve_id = match yaml["cve-id"].as_vec() {
-        Some(vec) => vec
+    let cve_id = match &yaml["cve-id"] {
+        Yaml::String(cve) => vec![cve.clone()],
+        Yaml::Array(cves) => cves
             .iter()
             .map(|item| item.as_str().unwrap().to_string())
             .collect(),
-        None => vec![],
+        _ => vec![],
     };
-    let cwe_id = match yaml["cwe-id"].as_vec() {
-        Some(vec) => vec
+    let cwe_id = match &yaml["cwe-id"] {
+        Yaml::String(cve) => vec![cve.clone()],
+        Yaml::Array(cves) => cves
             .iter()
             .map(|item| item.as_str().unwrap().to_string())
             .collect(),
-        None => vec![],
+        _ => vec![],
     };
     let cvss_metrics = yaml["cvss-metrics"].as_str().map(String::from);
     let cvss_score = yaml["cvss-score"].as_f64();

@@ -21,6 +21,11 @@ http:
     path:
       - "{{BaseURL}}"
 
+    payloads:
+      unused-variable:
+        - a
+        - b
+
     host-redirects: true
 
     matchers:

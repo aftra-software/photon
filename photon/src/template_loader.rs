@@ -880,10 +880,10 @@ mod tests {
     #[test]
     fn test_classification() {
         let templates = TemplateLoader::load_from_path("../test-templates");
-        let phpmyadmin_templ = find_template(&templates, "kval-test");
-        assert!(phpmyadmin_templ.info.classification.is_some());
+        let kval_template = find_template(&templates, "kval-test");
+        assert!(kval_template.info.classification.is_some());
 
-        let classification = phpmyadmin_templ.info.classification.as_ref().unwrap();
+        let classification = kval_template.info.classification.as_ref().unwrap();
         assert!(classification.cve_id == Vec::<String>::new());
         assert!(classification.cwe_id == vec![String::from("CWE-200")]);
         assert!(
@@ -894,5 +894,23 @@ mod tests {
 
         let dsl_templ = find_template(&templates, "dsl-variable-test");
         assert!(dsl_templ.info.classification.is_none());
+    }
+
+    #[test]
+    fn test_payloads() {
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        let kval_template = find_template(&templates, "kval-test");
+
+        let payloads: Vec<(&String, &Vec<Value>)> = kval_template.http[0].payloads.iter().collect();
+        assert!(
+            payloads
+                == vec![(
+                    &String::from("unused-variable"),
+                    &vec![
+                        Value::String(String::from("a")),
+                        Value::String(String::from("b"))
+                    ]
+                )]
+        );
     }
 }

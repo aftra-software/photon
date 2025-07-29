@@ -442,19 +442,18 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         Method::GET
     };
 
-    let body = if let Some(body) = http_body {
-        body.to_string()
-    } else {
-        String::new()
+    let body = match http_body {
+        Some(body) => body.to_string(),
+        None => String::new(),
     };
 
-    let matchers_condition = if yaml["matchers-condition"].is_badvalue() {
-        Condition::OR
-    } else {
-        match map_condition(yaml["matchers-condition"].as_str().unwrap()) {
+    let matchers_condition = if let Some(cond) = yaml["matchers-condition"].as_str() {
+        match map_condition(cond) {
             Some(condition) => condition,
             None => return Err(TemplateError::InvalidValue("matchers-condition".into())),
         }
+    } else {
+        Condition::OR
     };
 
     let matchers_parsed: Vec<_> = http_matchers

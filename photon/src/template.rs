@@ -72,10 +72,18 @@ pub struct HttpRequest {
     pub path: Vec<HttpReq>,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ContextScope {
+    Global,
+    Template,
+    Request,
+}
+
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
     pub parent: Option<Rc<RefCell<Context>>>,
+    pub scope: ContextScope,
 }
 
 impl Context {
@@ -90,6 +98,19 @@ impl Context {
 
     pub fn insert(&mut self, key: &str, value: Value) {
         self.variables.insert(key.to_string(), value);
+    }
+
+    /// `scope` must be the scope of the context, or a parent scope of the context.
+    pub fn insert_in_scope(&mut self, scope: ContextScope, key: &str, value: Value) {
+        if self.scope == scope {
+            self.insert(key, value);
+        } else {
+            self.parent
+                .as_ref()
+                .expect("Parent to exist, orphan context?")
+                .borrow_mut()
+                .insert_in_scope(scope, key, value);
+        }
     }
 }
 
@@ -241,12 +262,9 @@ impl HttpRequest {
                 .trim(),
         );
         for extractor in self.extractors.iter() {
-            if extractor.name.is_some() {
+            if let Some(name) = &extractor.name {
                 if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_ctx) {
-                    // A bit clunky to safely mutate the shared parent of the current ctx
-                    let tmp = ctx.parent.as_ref().unwrap().clone();
-                    let mut parent = tmp.borrow_mut();
-                    parent.insert(extractor.name.as_ref().unwrap(), res);
+                    ctx.insert_in_scope(ContextScope::Template, &name, res);
                 }
             }
         }
@@ -272,6 +290,7 @@ impl HttpRequest {
             let mut ctx = Context {
                 variables: FxHashMap::default(),
                 parent: Some(parent_ctx.clone()),
+                scope: ContextScope::Request,
             };
             for (key, value) in attack_values {
                 // TODO: for Value::String values, put them through bake_ctx, since some templates contain DSL things in payloads
@@ -376,6 +395,7 @@ impl Template {
         let ctx = Rc::from(RefCell::from(Context {
             variables: FxHashMap::from_iter(self.variables.iter().cloned()),
             parent: Some(parent_ctx),
+            scope: ContextScope::Template,
         }));
         for (key, value) in &self.dsl_variables {
             if let Ok(expr) = compile_expression_validated(value, &photon_ctx.functions) {
@@ -425,5 +445,78 @@ impl Template {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use photon_dsl::dsl::Value;
+    use rustc_hash::FxHashMap;
+
+    use crate::template::{Context, ContextScope};
+
+    #[test]
+    fn test_insert_in_scope() {
+        let global_ctx = Rc::from(RefCell::from(Context {
+            parent: None,
+            variables: FxHashMap::default(),
+            scope: ContextScope::Global,
+        }));
+
+        let template_ctx = Rc::from(RefCell::from(Context {
+            parent: Some(global_ctx),
+            variables: FxHashMap::default(),
+            scope: ContextScope::Template,
+        }));
+
+        let request_ctx = Rc::from(RefCell::from(Context {
+            parent: Some(template_ctx),
+            variables: FxHashMap::default(),
+            scope: ContextScope::Request,
+        }));
+
+        {
+            let mut borrowed = request_ctx.borrow_mut();
+            // Bypass ContextScope::Template and insert straight into Global scope
+            borrowed.insert_in_scope(ContextScope::Global, "global test", Value::Int(5));
+        }
+
+        // ew, assert the inserted value does exist in the global scope
+        assert!(
+            request_ctx
+                .borrow()
+                .parent
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .parent
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .variables
+                .get("global test")
+                == Some(&Value::Int(5))
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_insert_invalid_scope() {
+        let global_ctx = Rc::from(RefCell::from(Context {
+            parent: None,
+            variables: FxHashMap::default(),
+            scope: ContextScope::Global,
+        }));
+
+        let mut template_ctx = Context {
+            parent: Some(global_ctx),
+            variables: FxHashMap::default(),
+            scope: ContextScope::Template,
+        };
+
+        // This panics because ContextScope::Request can only exist below ContextScope::Template and not above
+        template_ctx.insert_in_scope(ContextScope::Request, "blehh", Value::Boolean(false));
     }
 }

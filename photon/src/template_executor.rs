@@ -12,7 +12,7 @@ use crate::{
     get_config,
     http::Collector,
     init_functions,
-    template::{Context, Template},
+    template::{Context, ContextScope, Template},
     template_loader::TemplateLoader,
     PhotonContext,
 };
@@ -83,6 +83,7 @@ where
             ctx: Rc::from(RefCell::from(Context {
                 variables: FxHashMap::default(),
                 parent: None,
+                scope: ContextScope::Global,
             })),
             photon_ctx: PhotonContext {
                 functions: init_functions(),
@@ -104,6 +105,7 @@ where
             ctx: Rc::from(RefCell::from(Context {
                 variables: FxHashMap::default(),
                 parent: None,
+                scope: ContextScope::Global,
             })),
             photon_ctx: PhotonContext {
                 functions: init_functions(),

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, fs};
+use std::{collections::HashMap, convert::identity, fmt::Debug, fs};
 
 use photon_dsl::{
     dsl::{CompiledExpression, Value},
@@ -425,8 +425,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     let http_matchers = yaml["matchers"].as_vec();
     let http_extractors = yaml["extractors"].as_vec();
 
-    let follow_redirects =
-        redirects.is_some_and(|val| val) || host_redirects.is_some_and(|val| val);
+    let follow_redirects = redirects.is_some_and(identity) || host_redirects.is_some_and(identity);
     let max_redirects = max_redirects.map(|val| val as u32);
 
     if http_matchers.is_none() {

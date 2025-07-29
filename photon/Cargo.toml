@@ -24,6 +24,8 @@ bincode = "2.0.0-rc.3"
 lz4 = "1.28.0"
 lazy_static = "1.5.0"
 base64 = "0.22.1"
+itertools = "0.14.0"
+murmur3 = "0.5.2"
 
 [features]
 default = ["curl/ssl"]

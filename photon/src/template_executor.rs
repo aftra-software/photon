@@ -9,8 +9,10 @@ use url::Url;
 
 use crate::{
     cache::{Cache, RegexCache},
-    get_config, init_functions,
-    template::{Collector, Context, Template},
+    get_config,
+    http::Collector,
+    init_functions,
+    template::{Context, ContextScope, Template},
     template_loader::TemplateLoader,
     PhotonContext,
 };
@@ -81,6 +83,7 @@ where
             ctx: Rc::from(RefCell::from(Context {
                 variables: FxHashMap::default(),
                 parent: None,
+                scope: ContextScope::Global,
             })),
             photon_ctx: PhotonContext {
                 functions: init_functions(),
@@ -102,6 +105,7 @@ where
             ctx: Rc::from(RefCell::from(Context {
                 variables: FxHashMap::default(),
                 parent: None,
+                scope: ContextScope::Global,
             })),
             photon_ctx: PhotonContext {
                 functions: init_functions(),

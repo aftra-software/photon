@@ -4,6 +4,7 @@ use photon_dsl::{
     dsl::{CompiledExpression, Value},
     parser::compile_expression,
 };
+use rustc_hash::FxHashMap;
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -11,10 +12,8 @@ use crate::{
     cache::{Cache, CacheKey, RegexCache},
     get_config,
     http::{get_bracket_pattern, HttpReq},
-    template::{
-        Condition, Extractor, ExtractorPart, ExtractorType, HttpRequest, Info, Matcher,
-        MatcherType, Method, ResponsePart, Severity, Template,
-    },
+    matcher::{Extractor, ExtractorPart, ExtractorType, Matcher, MatcherType, ResponsePart},
+    template::{AttackMode, Condition, HttpRequest, Info, Method, Severity, Template},
 };
 
 #[derive(Debug)]
@@ -251,8 +250,7 @@ fn parse_matcher_type(
                     .cloned()
                     .unwrap();
                 return Err(TemplateError::InvalidValue(format!(
-                    "Could not parse regex, parse output:\n{}",
-                    err
+                    "Could not parse regex, parse output:\n{err}"
                 )));
             }
 
@@ -284,7 +282,6 @@ pub fn parse_extractor(
     let extractor_name = yaml["name"].as_str();
     assert_fields(&[(extractor_type, "type")])?;
 
-    // TODO: Default extractor might be both Cookie + Header, so a secret third ExtractorPart
     let part = match extractor_part {
         Some(extractor_part) => {
             map_extractor_part(extractor_part).ok_or(TemplateError::InvalidValue("part".into()))?
@@ -562,11 +559,59 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     } else {
         vec![]
     };
-
-    requests.append(&mut raw);
-
     let flattened_headers: Vec<String> = headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
 
+    let attack_mode = if let Some(attack) = yaml["attack"].as_str() {
+        match attack {
+            "batteringram" => AttackMode::Batteringram,
+            "clusterbomb" => AttackMode::Clusterbomb,
+            "pitchfork" => AttackMode::Pitchfork,
+            _ => {
+                return Err(TemplateError::InvalidValue(format!(
+                    "Invalid attack mode: {attack}"
+                )))
+            }
+        }
+    } else {
+        AttackMode::Batteringram
+    };
+
+    let mut payloads = FxHashMap::default();
+
+    if let Some(payloads_map) = yaml["payloads"].as_hash() {
+        for (key_yaml, values_yaml) in payloads_map {
+            let key = key_yaml.as_str();
+            let values = values_yaml.as_vec();
+
+            if key.is_none() || values.is_none() {
+                debug!(
+                    "Invalid payload! key or value is none! key: {:?}, value: {:?}",
+                    key, values
+                );
+                continue;
+            }
+
+            let key = key.unwrap();
+            let values: Vec<Value> = values
+                .unwrap()
+                .iter()
+                .filter_map(|value| {
+                    // Map value to Value::Something, string or int or sth
+                    if let Some(val) = value.as_str() {
+                        Some(Value::String(String::from(val)))
+                    } else if let Some(val) = value.as_i64() {
+                        Some(Value::Int(val))
+                    } else {
+                        value.as_bool().map(Value::Boolean)
+                    }
+                })
+                .collect();
+
+            payloads.insert(String::from(key), values);
+        }
+    }
+
+    requests.append(&mut raw);
     requests
         .iter_mut()
         .for_each(|req| req.headers = flattened_headers.clone());
@@ -575,6 +620,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         matchers_condition,
         matchers,
         extractors,
+        attack_mode,
+        payloads,
         path: requests,
     })
 }
@@ -718,6 +765,16 @@ impl TemplateLoader {
         let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
         for template in &loaded_templates {
             for http in &template.http {
+                // TODO: Validate that the cache isn't accidentally leaking
+                // responses between same looking paths, where the paths are
+                // different due to some DSL stuff
+                // e.g. two identical paths with {{randstr}} in different templates
+                // will have different random strings, thus possible inconsistency!
+                // Have two things to think about
+                // 1. paths where dsl variable depends on something, e.g. extractor etc
+                // 2. paths where dsl variables are declared in the template
+                //    but are either static or deterministic, e.g. {{md5("test")}} but not {{rand_int(1, 100)}}
+                // UPDATE: Temporarily resolved by caching all requests with their post-bake urls
                 for request in &http.path {
                     tokens
                         .entry(CacheKey(
@@ -731,11 +788,16 @@ impl TemplateLoader {
             }
         }
         let keys: Vec<CacheKey> = tokens.keys().cloned().collect();
+        let mut num_cached = 0;
         for key in keys {
-            if *tokens.get(&key).unwrap() == 1 {
+            let num_tokens = *tokens.get(&key).unwrap();
+            if num_tokens == 1 {
                 tokens.remove(&key);
             }
+            num_cached += num_tokens;
         }
+        verbose!("Cached requests: {num_cached}");
+
         let cache = Cache::new(tokens);
         regex_cache.finalize();
         Self {

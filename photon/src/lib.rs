@@ -16,15 +16,18 @@ macro_rules! verbose {
 
 mod cache;
 mod http;
+mod matcher;
 pub mod template;
 pub mod template_executor;
 pub mod template_loader;
 
-use std::{sync::Mutex, time::Duration};
+use std::{io::Cursor, sync::Mutex, time::Duration};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use curl::easy::Easy;
+use itertools::Itertools;
 use md5::{Digest, Md5};
+use murmur3::murmur3_32;
 use photon_dsl::{
     dsl::{DSLStack, Value},
     DslFunction,
@@ -193,6 +196,53 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         ),
     );
     functions.insert(
+        "base64".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                Ok(Value::String(BASE64_STANDARD.encode(inp)))
+            }),
+        ),
+    );
+    functions.insert(
+        "base64_py".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let encoded = BASE64_STANDARD.encode(inp);
+                let mut pythonic = String::with_capacity(encoded.len() + 10); // Slightly larger string, to account for the added spaces in most cases
+
+                // According to nuclei, Python's base64 encoder creates base64 with lines of max length 76
+                // Although I haven't been able to verify that, might be old python behavior?
+                for chunk in &encoded.chars().chunks(76) {
+                    let mut len = 0;
+                    for chr in chunk {
+                        pythonic.push(chr);
+                        len += 1;
+                    }
+                    if len == 76 {
+                        pythonic.push('\n');
+                    }
+                }
+
+                Ok(Value::String(pythonic))
+            }),
+        ),
+    );
+    functions.insert(
+        "mmh3".into(), // MurMurHash3
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let inp = stack.pop_string()?;
+                let hash_result = murmur3_32(&mut Cursor::new(inp), 0).map_err(|_| ())?;
+                Ok(Value::Int(hash_result as i64))
+            }),
+        ),
+    );
+    functions.insert(
         "rand_int".into(),
         DslFunction::new(
             2,
@@ -273,6 +323,20 @@ mod tests {
         assert!(test_expression(
             &functions,
             "base64_decode('YmFzZTY0IHRlc3Qgc3RyaW5n') == 'base64 test string'"
+        ));
+        assert!(test_expression(
+            &functions,
+            "base64('base64 test string') == 'YmFzZTY0IHRlc3Qgc3RyaW5n'"
+        ));
+        // Line shorter than 76 letters case
+        assert!(test_expression(
+            &functions,
+            "base64_py('base64 test string') == 'YmFzZTY0IHRlc3Qgc3RyaW5n'"
+        ));
+        // Line longer than 76 letters case
+        assert!(test_expression(
+            &functions,
+            "base64_py('base64 test string base64 test string base64 test string base64 test string base64 test string') == 'YmFzZTY0IHRlc3Qgc3RyaW5nIGJhc2U2NCB0ZXN0IHN0cmluZyBiYXNlNjQgdGVzdCBzdHJpbmcg\nYmFzZTY0IHRlc3Qgc3RyaW5nIGJhc2U2NCB0ZXN0IHN0cmluZw=='"
         ));
         // Random tests, shows that rand_int is exclusive
         assert!(test_expression(&functions, "rand_int(1, 3) >= 1"));

@@ -52,7 +52,9 @@ impl Cache {
 
     pub fn get(&mut self, key: &CacheKey) -> Option<HttpResponse> {
         let ret = self.inner.get(key).unwrap().clone();
-        self.decrease_token(key);
+        // XXX: Tokens are currently used to determine if its likely a request
+        // repeated across multiple templates, thus we don't decrease currently
+        //self.decrease_token(key);
         if let Some(data) = ret {
             // Unwraps below should be 100% safe, since both bincode and compressed data are created by `store` function below.
             let decompressed = block::decompress(&data, None).unwrap();
@@ -81,7 +83,10 @@ impl Cache {
     }
 
     pub fn can_cache(&self, key: &CacheKey) -> bool {
-        self.current_tokens.contains_key(key)
+        //self.current_tokens.contains_key(key)
+
+        // XXX: Always return true for now, while the caching implementation caches all requests
+        true
     }
 }
 

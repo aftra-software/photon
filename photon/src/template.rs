@@ -31,14 +31,14 @@ pub enum Severity {
 
 impl Display for Severity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Critical => write!(f, "Critical"),
-            Self::High => write!(f, "High"),
-            Self::Medium => write!(f, "Medium"),
-            Self::Low => write!(f, "Low"),
-            Self::Info => write!(f, "Info"),
-            Self::Unknown => write!(f, "Unknown"),
-        }
+        f.write_str(match self {
+            Self::Critical => "Critical",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+            Self::Info => "Info",
+            Self::Unknown => "Unknown",
+        })
     }
 }
 

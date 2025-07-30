@@ -131,8 +131,8 @@ fn parse_classification(yaml: &Yaml) -> Option<Classification> {
         Yaml::String(cve) => vec![cve.clone()],
         Yaml::Array(cves) => cves
             .iter()
-            .map(|item| item.as_str().unwrap().to_string())
-            .collect(),
+            .map(|item| item.as_str().map(String::from))
+            .collect::<Option<Vec<_>>()?,
         _ => vec![],
     };
     let cwe_id = match &yaml["cwe-id"] {

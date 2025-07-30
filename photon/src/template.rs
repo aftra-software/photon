@@ -1,5 +1,9 @@
 use core::str;
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::{Display, Formatter},
+    rc::Rc,
+};
 
 use crate::{
     cache::{Cache, RegexCache},
@@ -23,6 +27,19 @@ pub enum Severity {
     Medium,
     High,
     Critical,
+}
+
+impl Display for Severity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Critical => write!(f, "Critical"),
+            Self::High => write!(f, "High"),
+            Self::Medium => write!(f, "Medium"),
+            Self::Low => write!(f, "Low"),
+            Self::Info => write!(f, "Info"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]

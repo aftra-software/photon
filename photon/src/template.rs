@@ -1,5 +1,9 @@
 use core::str;
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    fmt::{Display, Formatter},
+    rc::Rc,
+};
 
 use crate::{
     cache::{Cache, RegexCache},
@@ -25,6 +29,19 @@ pub enum Severity {
     Critical,
 }
 
+impl Display for Severity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Critical => "Critical",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+            Self::Info => "Info",
+            Self::Unknown => "Unknown",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Method {
@@ -44,10 +61,20 @@ pub enum Condition {
 }
 
 #[derive(Debug, Clone)]
+pub struct Classification {
+    pub cve_id: Vec<String>,
+    pub cwe_id: Vec<String>,
+    pub cvss_metrics: Option<String>,
+    pub cvss_score: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Info {
     pub name: String,
-    pub author: String,
+    pub author: Vec<String>,
     pub description: String,
+    pub remediation: Option<String>,
+    pub classification: Option<Classification>,
     pub severity: Severity,
     pub reference: Vec<String>,
     pub tags: Vec<String>,

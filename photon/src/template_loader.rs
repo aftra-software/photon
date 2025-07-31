@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, fs};
+use std::{collections::HashMap, convert::identity, fmt::Debug, fs};
 
 use photon_dsl::{
     dsl::{CompiledExpression, Value},
@@ -13,7 +13,9 @@ use crate::{
     get_config,
     http::{get_bracket_pattern, HttpReq},
     matcher::{Extractor, ExtractorPart, ExtractorType, Matcher, MatcherType, ResponsePart},
-    template::{AttackMode, Condition, HttpRequest, Info, Method, Severity, Template},
+    template::{
+        AttackMode, Classification, Condition, HttpRequest, Info, Method, Severity, Template,
+    },
 };
 
 #[derive(Debug)]
@@ -38,11 +40,11 @@ fn load_yaml_from_file(file: &str) -> Result<Vec<Yaml>, TemplateError> {
         Err(_) => return Err(TemplateError::InvalidYaml),
     };
 
-    if parsed.len() != 1 {
-        return Err(TemplateError::InvalidYaml);
+    if parsed.len() == 1 {
+        Ok(parsed)
+    } else {
+        Err(TemplateError::InvalidYaml)
     }
-
-    Ok(parsed)
 }
 
 fn map_severity(severity: &str) -> Option<Severity> {
@@ -120,10 +122,52 @@ fn assert_fields<T>(fields: &[(Option<T>, &str)]) -> Result<(), TemplateError> {
     Ok(())
 }
 
-pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
+fn parse_classification(yaml: &Yaml) -> Option<Classification> {
+    if yaml.is_badvalue() {
+        return None;
+    }
+
+    let cve_id = match &yaml["cve-id"] {
+        Yaml::String(cve) => vec![cve.clone()],
+        Yaml::Array(cves) => cves
+            .iter()
+            .map(|item| item.as_str().map(String::from))
+            .collect::<Option<Vec<_>>>()?,
+        _ => vec![],
+    };
+    let cwe_id = match &yaml["cwe-id"] {
+        Yaml::String(cve) => vec![cve.clone()],
+        Yaml::Array(cves) => cves
+            .iter()
+            .map(|item| item.as_str().map(String::from))
+            .collect::<Option<Vec<_>>>()?,
+        _ => vec![],
+    };
+    let cvss_metrics = yaml["cvss-metrics"].as_str().map(String::from);
+    let cvss_score = if let Some(score) = yaml["cvss-score"].as_f64() {
+        Some(score)
+    } else if let Some(score) = yaml["cvss-score"].as_i64() {
+        Some(score as f64)
+    } else {
+        None
+    };
+
+    // Only return Classification if any of it's recognized fields are set
+    if cvss_metrics.is_some() || cvss_score.is_some() || !cve_id.is_empty() || cwe_id.is_empty() {
+        Some(Classification {
+            cve_id,
+            cwe_id,
+            cvss_metrics,
+            cvss_score,
+        })
+    } else {
+        None
+    }
+}
+
+fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
     let info_name = yaml["name"].as_str();
     let info_author = yaml["author"].as_str();
-    let info_description = yaml["description"].as_str();
     let info_severity = yaml["severity"].as_str();
 
     assert_fields(&[
@@ -132,52 +176,42 @@ pub fn parse_info(yaml: &Yaml) -> Result<Info, TemplateError> {
         (info_severity, "severity"),
     ])?;
 
-    let description = if let Some(desc) = info_description {
-        desc.to_string()
-    } else {
-        String::new()
+    let description = match yaml["description"].as_str() {
+        Some(desc) => String::from(desc.trim()),
+        None => String::new(),
     };
 
-    let severity = map_severity(info_severity.unwrap());
-    if severity.is_none() {
-        return Err(TemplateError::InvalidValue("Severity".into()));
-    }
+    let remediation = yaml["remediation"].as_str().map(|rem| rem.to_string());
 
-    let references = if yaml["reference"].is_array() {
-        yaml["reference"]
-            .as_vec()
-            .unwrap()
+    let severity = match map_severity(info_severity.unwrap()) {
+        Some(severity) => severity,
+        None => return Err(TemplateError::InvalidValue("Severity".into())),
+    };
+
+    let reference = match &yaml["reference"] {
+        Yaml::Array(arr) => arr
             .iter()
             .map(|item| item.as_str().unwrap().to_string())
-            .collect()
-    } else if yaml["reference"].as_str().is_some() {
-        yaml["reference"]
-            .as_str()
-            .unwrap()
-            .split_terminator('\n')
-            .map(|item| item.to_string())
-            .collect()
-    } else {
-        vec![]
+            .collect(),
+        Yaml::String(reference) => reference.split_terminator('\n').map(String::from).collect(),
+        _ => vec![],
     };
 
-    let tags = if yaml["tags"].is_badvalue() {
-        vec![]
-    } else {
-        yaml["tags"]
-            .as_str()
-            .unwrap()
-            .split(',')
-            .map(|item| item.to_string())
-            .collect()
+    let tags = match yaml["tags"].as_str() {
+        Some(tags) => tags.split(',').map(String::from).collect(),
+        None => vec![],
     };
+
+    let classification = parse_classification(&yaml["classification"]);
 
     Ok(Info {
         name: info_name.unwrap().into(),
-        author: info_author.unwrap().into(),
+        author: info_author.unwrap().split(',').map(String::from).collect(),
         description,
-        severity: severity.unwrap(),
-        reference: references,
+        remediation,
+        severity,
+        classification,
+        reference,
         tags,
     })
 }
@@ -201,11 +235,10 @@ fn parse_matcher_type(
             words.append(&mut words_strings);
         }
         MatcherType::DSL(dsls) => {
-            let dsl_list = yaml["dsl"].as_vec();
-            if dsl_list.is_none() {
-                return Err(TemplateError::MissingField("dsl".into()));
-            }
-            let dsl_list = dsl_list.unwrap();
+            let dsl_list = match yaml["dsl"].as_vec() {
+                Some(list) => list,
+                None => return Err(TemplateError::MissingField("dsl".into())),
+            };
             let mut dsl_strings: Vec<CompiledExpression> = dsl_list
                 .iter()
                 .flat_map(|item| compile_expression(item.as_str().unwrap()))
@@ -228,15 +261,13 @@ fn parse_matcher_type(
             dsls.append(&mut dsl_strings);
         }
         MatcherType::Regex(regexes) => {
-            let regex_list = yaml["regex"].as_vec();
-            if regex_list.is_none() {
-                return Err(TemplateError::MissingField("regex".into()));
-            }
-            let regex_strings: Vec<String> = regex_list
-                .unwrap()
-                .iter()
-                .map(|item| item.as_str().unwrap().to_string())
-                .collect();
+            let regex_strings: Vec<String> = match yaml["regex"].as_vec() {
+                Some(regexes) => regexes
+                    .iter()
+                    .map(|item| item.as_str().unwrap().to_string())
+                    .collect(),
+                None => return Err(TemplateError::MissingField("regex".into())),
+            };
 
             let patterns: Result<Vec<u32>, _> = regex_strings
                 .iter()
@@ -257,15 +288,14 @@ fn parse_matcher_type(
             *regexes = patterns.unwrap()
         }
         MatcherType::Status(statuses) => {
-            let status_list = yaml["status"].as_vec();
-            if status_list.is_none() {
-                return Err(TemplateError::MissingField("status".into()));
-            }
-            let mut status_values: Vec<u32> = status_list
-                .unwrap()
-                .iter()
-                .map(|item| item.as_i64().unwrap() as u32)
-                .collect();
+            let mut status_values: Vec<u32> = match yaml["status"].as_vec() {
+                Some(list) => list
+                    .iter()
+                    .map(|item| item.as_i64().unwrap() as u32)
+                    .collect(),
+                None => return Err(TemplateError::MissingField("status".into())),
+            };
+
             statuses.append(&mut status_values);
         }
     }
@@ -395,8 +425,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     let http_matchers = yaml["matchers"].as_vec();
     let http_extractors = yaml["extractors"].as_vec();
 
-    let follow_redirects =
-        redirects.is_some_and(|val| val) || host_redirects.is_some_and(|val| val);
+    let follow_redirects = redirects.is_some_and(identity) || host_redirects.is_some_and(identity);
     let max_redirects = max_redirects.map(|val| val as u32);
 
     if http_matchers.is_none() {
@@ -413,19 +442,18 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         Method::GET
     };
 
-    let body = if let Some(body) = http_body {
-        body.to_string()
-    } else {
-        String::new()
+    let body = match http_body {
+        Some(body) => body.to_string(),
+        None => String::new(),
     };
 
-    let matchers_condition = if yaml["matchers-condition"].is_badvalue() {
-        Condition::OR
-    } else {
-        match map_condition(yaml["matchers-condition"].as_str().unwrap()) {
+    let matchers_condition = if let Some(cond) = yaml["matchers-condition"].as_str() {
+        match map_condition(cond) {
             Some(condition) => condition,
             None => return Err(TemplateError::InvalidValue("matchers-condition".into())),
         }
+    } else {
+        Condition::OR
     };
 
     let matchers_parsed: Vec<_> = http_matchers
@@ -805,5 +833,84 @@ impl TemplateLoader {
             regex_cache,
             loaded_templates,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use photon_dsl::dsl::Value;
+
+    use crate::{template::Template, template_loader::TemplateLoader};
+
+    fn find_template<'a>(templates: &'a TemplateLoader, id: &str) -> &'a Template {
+        let templ = templates
+            .loaded_templates
+            .iter()
+            .find(|templ| templ.id == id);
+        assert!(templ.is_some(), "Couldn't find template {}", id);
+
+        templ.unwrap()
+    }
+
+    #[test]
+    fn load_test_templates() {
+        // Test is ran inside photon sub-folder, so we go up one folder to find test templates
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        assert!(templates.len() == 5);
+
+        let cve_template = find_template(&templates, "CVE-2015-7297");
+        assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);
+
+        let info = &cve_template.info;
+        assert!(info.name == "Joomla! Core SQL Injection");
+        assert!(info.description == "A SQL injection vulnerability in Joomla! 3.2 before 3.4.4 allows remote attackers to execute arbitrary SQL commands.");
+        assert!(info.author == vec![String::from("princechaddha")]);
+        assert!(info.classification.is_some());
+
+        let classification = info.classification.as_ref().unwrap();
+        assert!(classification.cve_id == vec![String::from("CVE-2015-7297")]);
+        assert!(classification.cwe_id == vec![String::from("CWE-89")]);
+        assert!(
+            classification.cvss_metrics
+                == Some(String::from("CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P"))
+        );
+        assert!(classification.cvss_score == Some(7.5));
+    }
+
+    #[test]
+    fn test_classification() {
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        let kval_template = find_template(&templates, "kval-test");
+        assert!(kval_template.info.classification.is_some());
+
+        let classification = kval_template.info.classification.as_ref().unwrap();
+        assert!(classification.cve_id == Vec::<String>::new());
+        assert!(classification.cwe_id == vec![String::from("CWE-200")]);
+        assert!(
+            classification.cvss_metrics
+                == Some(String::from("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"))
+        );
+        assert!(classification.cvss_score == Some(0.0));
+
+        let dsl_templ = find_template(&templates, "dsl-variable-test");
+        assert!(dsl_templ.info.classification.is_none());
+    }
+
+    #[test]
+    fn test_payloads() {
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        let kval_template = find_template(&templates, "kval-test");
+
+        let payloads: Vec<(&String, &Vec<Value>)> = kval_template.http[0].payloads.iter().collect();
+        assert!(
+            payloads
+                == vec![(
+                    &String::from("unused-variable"),
+                    &vec![
+                        Value::String(String::from("a")),
+                        Value::String(String::from("b"))
+                    ]
+                )]
+        );
     }
 }

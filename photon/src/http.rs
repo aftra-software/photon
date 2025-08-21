@@ -33,6 +33,7 @@ pub fn get_bracket_pattern() -> &'static Regex {
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct HttpResponse {
+    pub req_url: String,
     pub body: Vec<u8>,
     pub headers: Vec<(String, String)>,
     pub status_code: u32,
@@ -248,6 +249,7 @@ fn curl_do_request(
     debug!("Body len: {}", contents.0.len());
 
     let resp = HttpResponse {
+        req_url: String::from(path),
         body: mem::take(&mut contents.0),
         status_code: curl.response_code().unwrap(),
         duration,

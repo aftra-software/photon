@@ -87,13 +87,13 @@ fn main() {
                 *locked_stopwatch = Instant::now();
             }
         },
-        |template, name| {
-            if name.is_some() {
+        |template, res| {
+            if let Some(name) = &res.name {
                 println!(
                     "Matched: [{}] {}:{}",
                     template.info.severity.colored_string(),
                     template.id,
-                    name.unwrap()
+                    name
                 );
             } else {
                 println!(

@@ -12,7 +12,7 @@ use crate::{
     get_config,
     http::Collector,
     init_functions,
-    template::{Context, ContextScope, Template},
+    template::{Context, ContextScope, MatchResult, Template},
     template_loader::TemplateLoader,
     PhotonContext,
 };
@@ -57,7 +57,7 @@ impl Default for ExecutionOptions {
 pub struct TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
-    K: Fn(&Template, Option<String>),
+    K: Fn(&Template, &MatchResult),
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
@@ -75,7 +75,7 @@ where
 impl<T, K, C> TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
-    K: Fn(&Template, Option<String>),
+    K: Fn(&Template, &MatchResult),
     C: Fn() -> bool,
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {

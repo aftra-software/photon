@@ -186,7 +186,8 @@ pub struct Template {
 // TODO: MatchResult values from extractors (figure out how we want to handle that logic as well)
 #[derive(Debug)]
 pub struct MatchResult {
-    pub name: String,
+    pub name: Option<String>,
+    pub matched_url: String,
     pub internal: bool,
 }
 
@@ -301,7 +302,8 @@ impl HttpRequest {
             // Negative XOR matches
             if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
                 matches.push(MatchResult {
-                    name: matcher.name.clone().unwrap_or(String::new()),
+                    matched_url: resp.req_url.clone(),
+                    name: matcher.name.clone(),
                     internal: matcher.internal,
                 });
             }
@@ -416,7 +418,7 @@ impl Template {
         continue_predicate: &Option<C>,
     ) -> bool
     where
-        K: Fn(&Template, Option<String>),
+        K: Fn(&Template, &MatchResult),
         C: Fn() -> bool,
     {
         let ctx = Rc::from(RefCell::from(Context {
@@ -452,21 +454,11 @@ impl Template {
                 req_counter,
                 cache,
             );
-            if !match_results.is_empty() {
-                // Stupid string printing, for the cases where we have templates like
-                // missing-header:x-iframe-whatever
-                // missing-header:content-security-policy
-                // And want to display the different cases that were matched
-                let mut unique_names = FxHashSet::default();
-                for matched in &match_results {
-                    if !matched.internal {
-                        unique_names.insert(matched.name.clone());
-                    }
-                }
-                for name in unique_names {
-                    let name = if name.is_empty() { None } else { Some(name) };
+            // Do a callback for all non-internal matches
+            for matched in &match_results {
+                if !matched.internal {
                     if let Some(callback) = callback {
-                        callback(self, name)
+                        callback(self, matched)
                     }
                 }
             }

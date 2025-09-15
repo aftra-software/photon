@@ -99,7 +99,7 @@ where
         }
     }
 
-    // Usess more memory than `from` since it copies the TemplateLoader
+    // Uses more memory than `from` since it copies the TemplateLoader
     pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
         Self {
             ctx: Rc::from(RefCell::from(Context {
@@ -141,6 +141,18 @@ where
     }
 
     pub fn execute_from(&mut self, base_url: &str, from: usize) -> ScanResult<()> {
+        self.execute_iter(base_url, |s| s.iter().enumerate().skip(from))
+    }
+
+    pub fn execute_iter<
+        'a,
+        I: Iterator<Item = (usize, &'a Template)>,
+        F: FnOnce(&'a Vec<Template>) -> I,
+    >(
+        &'a mut self,
+        base_url: &str,
+        iter_fn: F,
+    ) -> ScanResult<()> {
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
             let parsed: Result<Url, _> = base_url.parse();
@@ -172,7 +184,7 @@ where
             borrowed.insert_str("RootURL", base_url);
         }
 
-        for (i, template) in self.templates.iter().enumerate().skip(from) {
+        for (i, template) in iter_fn(&self.templates) {
             debug!("Executing template {}", template.id);
             // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
             {
@@ -216,6 +228,6 @@ where
     }
 
     pub fn execute(&mut self, base_url: &str) -> ScanResult<()> {
-        self.execute_from(base_url, 0)
+        self.execute_iter(base_url, |s| s.iter().enumerate())
     }
 }

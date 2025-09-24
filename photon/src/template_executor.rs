@@ -153,6 +153,7 @@ where
         base_url: &str,
         iter_fn: F,
     ) -> ScanResult<()> {
+        self.cache.reset();
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
             let parsed: Result<Url, _> = base_url.parse();

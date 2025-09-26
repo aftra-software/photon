@@ -184,7 +184,7 @@ pub struct Template {
 }
 
 // TODO: MatchResult values from extractors (figure out how we want to handle that logic as well)
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct MatchResult {
     pub name: Option<String>,
     pub matched_url: String,
@@ -269,7 +269,7 @@ impl HttpRequest {
         ctx: &mut Context,
         regex_cache: &RegexCache,
         photon_ctx: &PhotonContext,
-    ) -> Vec<MatchResult> {
+    ) -> FxHashSet<MatchResult> {
         ctx.insert_str(
             &format!("body_{}", idx + 1),
             &String::from_utf8_lossy(&resp.body),
@@ -297,11 +297,11 @@ impl HttpRequest {
             }
         }
 
-        let mut matches = Vec::new();
+        let mut matches = FxHashSet::default();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
             if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
-                matches.push(MatchResult {
+                matches.insert(MatchResult {
                     matched_url: resp.req_url.clone(),
                     name: matcher.name.clone(),
                     internal: matcher.internal,
@@ -341,7 +341,7 @@ impl HttpRequest {
         req_counter: &mut u32,
         cache: &mut Cache,
         regex_cache: &RegexCache,
-    ) -> Option<Vec<MatchResult>> {
+    ) -> Option<FxHashSet<MatchResult>> {
         let resp = req.do_request(base_url, options, curl, ctx, photon_ctx, req_counter, cache)?;
         let matchers_result = self.handle_response(resp, idx, ctx, regex_cache, photon_ctx);
 
@@ -373,7 +373,7 @@ impl HttpRequest {
         photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
-    ) -> Vec<MatchResult> {
+    ) -> FxHashSet<MatchResult> {
         let payload_contexts = self.all_payload_contexts(parent_ctx);
 
         for mut context in payload_contexts {
@@ -396,7 +396,7 @@ impl HttpRequest {
             }
         }
 
-        vec![]
+        FxHashSet::default()
     }
 }
 
@@ -444,7 +444,7 @@ impl Template {
                 return false;
             }
 
-            let match_results = http.execute(
+            let match_results: FxHashSet<MatchResult> = http.execute(
                 base_url,
                 options,
                 curl,

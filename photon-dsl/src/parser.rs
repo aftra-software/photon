@@ -1,17 +1,18 @@
 use pest::{
+    Parser,
     iterators::{Pair, Pairs},
     pratt_parser::PrattParser,
-    Parser,
 };
 use pest_derive::Parser;
 use rustc_hash::FxHashMap;
 
 use crate::{
+    DslFunction,
     dsl::{
-        compile_bytecode, optimize_expr, validate_expr_funcs, CompiledExpression, Expr, Operator,
-        Value,
+        CompiledExpression, Expr, Operator, Value, compile_bytecode, optimize_expr,
+        validate_expr_funcs,
     },
-    get_config, DslFunction,
+    get_config,
 };
 
 #[derive(Parser)]

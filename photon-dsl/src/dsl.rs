@@ -3,7 +3,7 @@ use std::fmt::Display;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::{get_config, DslFunction};
+use crate::{DslFunction, get_config};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -640,7 +640,12 @@ where
 
                             // Verify that the function popped exactly f.params values off the stack
                             if stack.len() != stack_len - f.params {
-                                debug!("Function {} popped {} values off the stack, expected {} popped.", key, stack_len - stack.len(), f.params);
+                                debug!(
+                                    "Function {} popped {} values off the stack, expected {} popped.",
+                                    key,
+                                    stack_len - stack.len(),
+                                    f.params
+                                );
                                 return Err(());
                             }
 

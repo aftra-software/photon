@@ -23,14 +23,14 @@ pub mod template_loader;
 
 use std::{io::Cursor, sync::Mutex, time::Duration};
 
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use curl::easy::Easy;
 use itertools::Itertools;
 use md5::{Digest, Md5};
 use murmur3::murmur3_32;
 use photon_dsl::{
-    dsl::{DSLStack, Value},
     DslFunction,
+    dsl::{DSLStack, Value},
 };
 use rand::Rng;
 use regex::Regex;

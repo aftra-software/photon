@@ -11,7 +11,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 use crate::{
     cache::{Cache, CacheKey, RegexCache},
     get_config,
-    http::{get_bracket_pattern, HttpReq},
+    http::{HttpReq, get_bracket_pattern},
     matcher::{Extractor, ExtractorPart, ExtractorType, Matcher, MatcherType, ResponsePart},
     template::{
         AttackMode, Classification, Condition, HttpRequest, Info, Method, Severity, Template,
@@ -597,7 +597,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             _ => {
                 return Err(TemplateError::InvalidValue(format!(
                     "Invalid attack mode: {attack}"
-                )))
+                )));
             }
         }
     } else {
@@ -661,21 +661,27 @@ fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<(String, String)>)
     let map = yaml.as_hash().unwrap();
 
     for (k, v) in map {
-        if k.is_array() || v.is_array() {
+        let Some(key) = k.as_str() else { continue };
+
+        match v {
+            Yaml::Integer(val) => variables.push((key.to_string(), Value::Int(*val))),
+            Yaml::Boolean(val) => variables.push((key.to_string(), Value::Boolean(*val))),
+            Yaml::String(val) => {
+                if let Some(captures) = get_bracket_pattern().captures(val) {
+                    // We expect expressions in variables to be standalone
+                    // If we ever find out that's not the case, we need to do the same as `bake_ctx` in http.rs
+                    dsl_variables.push((
+                        key.to_string(),
+                        String::from(captures.get(1).unwrap().as_str()),
+                    ));
+                } else {
+                    variables.push((key.to_string(), Value::String(val.to_string())));
+                }
+            }
             // TODO: Array support required in DSL
-            continue;
-        }
-        let key = k.as_str().unwrap();
-        let value = v.as_str().unwrap();
-        if let Some(captures) = get_bracket_pattern().captures(value) {
-            // We expect expressions in variables to be standalone
-            // If we ever find out that's not the case, we need to do the same as `bake_ctx` in http.rs
-            dsl_variables.push((
-                key.to_string(),
-                String::from(captures.get(1).unwrap().as_str()),
-            ));
-        } else {
-            variables.push((key.to_string(), Value::String(value.to_string())));
+            unsupported => {
+                debug!("Unsupported value: {:?}", unsupported)
+            }
         }
     }
 
@@ -769,9 +775,8 @@ impl TemplateLoader {
 
         for entry in WalkDir::new(path).into_iter().flatten() {
             if entry.file_type().is_file()
-                && entry.path().extension().is_some()
-                && (entry.path().extension().unwrap() == "yml"
-                    || entry.path().extension().unwrap() == "yaml")
+                && let Some(extension) = entry.path().extension()
+                && (extension == "yml" || extension == "yaml")
             {
                 let template = load_template(entry.path().to_str().unwrap(), &mut regex_cache);
                 if template.is_ok() {
@@ -863,7 +868,10 @@ mod tests {
 
         let info = &cve_template.info;
         assert!(info.name == "Joomla! Core SQL Injection");
-        assert!(info.description == "A SQL injection vulnerability in Joomla! 3.2 before 3.4.4 allows remote attackers to execute arbitrary SQL commands.");
+        assert!(
+            info.description
+                == "A SQL injection vulnerability in Joomla! 3.2 before 3.4.4 allows remote attackers to execute arbitrary SQL commands."
+        );
         assert!(info.author == vec![String::from("princechaddha")]);
         assert!(info.classification.is_some());
 

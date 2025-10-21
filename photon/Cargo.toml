@@ -4,8 +4,8 @@ crate-type = ["rlib"]
 [package]
 name = "photon"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.85"
 
 [dependencies]
 photon_dsl = { path = "../photon-dsl" }

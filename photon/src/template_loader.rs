@@ -736,10 +736,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
 
     let http = http_parsed.into_iter().flatten().collect();
 
-    println!("ID: {:?}", id);
-
     let (variables, dsl_variables) = if template_yaml["variables"].is_hash() {
-        println!("parsing");
         parse_variables(&template_yaml["variables"])
     } else {
         (vec![], vec![])

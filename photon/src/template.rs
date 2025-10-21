@@ -6,12 +6,12 @@ use std::{
 };
 
 use crate::{
+    PhotonContext,
     cache::{Cache, RegexCache},
     get_config,
     http::{CurlHandle, HttpReq, HttpResponse},
     matcher::{Extractor, Matcher},
     template_executor::ExecutionOptions,
-    PhotonContext,
 };
 use photon_dsl::{
     dsl::{Value, VariableContainer},

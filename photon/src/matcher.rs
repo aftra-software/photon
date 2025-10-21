@@ -1,11 +1,11 @@
 use photon_dsl::dsl::{CompiledExpression, Value};
 
 use crate::{
+    PhotonContext,
     cache::RegexCache,
     get_config,
-    http::{bake_ctx, get_bracket_pattern, HttpResponse},
+    http::{HttpResponse, bake_ctx, get_bracket_pattern},
     template::{Condition, Context},
-    PhotonContext,
 };
 
 #[derive(Debug, Clone)]

@@ -8,13 +8,13 @@ use rustc_hash::FxHashMap;
 use url::Url;
 
 use crate::{
+    PhotonContext,
     cache::{Cache, RegexCache},
     get_config,
     http::Collector,
     init_functions,
     template::{Context, ContextScope, MatchResult, Template},
     template_loader::TemplateLoader,
-    PhotonContext,
 };
 
 pub struct ExecutionOptions {
@@ -174,7 +174,7 @@ where
             } else {
                 match parsed.err().unwrap() {
                     url::ParseError::RelativeUrlWithoutBase => {
-                        return Err(ScanError::MissingScheme)
+                        return Err(ScanError::MissingScheme);
                     }
                     _ => return Err(ScanError::UrlParseError),
                 }

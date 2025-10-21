@@ -18,11 +18,11 @@ use photon_dsl::{
 use regex::Regex;
 
 use crate::{
+    PhotonContext,
     cache::{Cache, CacheKey},
     get_config,
     template::{Context, Method},
     template_executor::ExecutionOptions,
-    PhotonContext,
 };
 
 pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();

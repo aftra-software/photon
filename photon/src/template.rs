@@ -269,7 +269,7 @@ impl HttpRequest {
         ctx: &mut Context,
         regex_cache: &RegexCache,
         photon_ctx: &PhotonContext,
-    ) -> FxHashSet<MatchResult> {
+    ) -> Vec<MatchResult> {
         ctx.insert_str(
             &format!("body_{}", idx + 1),
             &String::from_utf8_lossy(&resp.body),
@@ -297,11 +297,11 @@ impl HttpRequest {
             }
         }
 
-        let mut matches = FxHashSet::default();
+        let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
             if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
-                matches.insert(MatchResult {
+                matches.push(MatchResult {
                     matched_url: resp.req_url.clone(),
                     name: matcher.name.clone(),
                     internal: matcher.internal,
@@ -349,12 +349,12 @@ impl HttpRequest {
             match self.matchers_condition {
                 Condition::AND => {
                     if matchers_result.len() == self.matchers.len() {
-                        return Some(matchers_result);
+                        return Some(FxHashSet::from_iter(matchers_result));
                     }
                 }
                 Condition::OR => {
                     if !matchers_result.is_empty() {
-                        return Some(matchers_result);
+                        return Some(FxHashSet::from_iter(matchers_result));
                     }
                 }
             }

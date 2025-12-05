@@ -722,7 +722,8 @@ where
                     let mut baked = val.clone();
                     loop {
                         let tmp = baked.clone();
-                        let matches: Vec<_> = get_bracket_pattern().captures_iter(tmp.as_str()).collect();
+                        let matches: Vec<_> =
+                            get_bracket_pattern().captures_iter(tmp.as_str()).collect();
                         // End condition
                         if matches.is_empty() {
                             break;
@@ -730,7 +731,10 @@ where
                             for mat in matches.iter() {
                                 let match_str = mat.get(1).unwrap().as_str();
                                 if let Some(matched) = variables.get(match_str) {
-                                    baked.replace_range(mat.get(0).unwrap().range(), &matched.to_string());
+                                    baked.replace_range(
+                                        mat.get(0).unwrap().range(),
+                                        &matched.to_string(),
+                                    );
                                     break;
                                 }
                             }

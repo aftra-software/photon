@@ -265,9 +265,11 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let num = stack.pop()?;
 
                 match num {
-                    Value::String(num_str) => Ok(Value::Int(num_str.parse::<i64>().map_err(|_| ())?)),
+                    Value::String(num_str) => {
+                        Ok(Value::Int(num_str.parse::<i64>().map_err(|_| ())?))
+                    }
                     Value::Int(num) => Ok(Value::Int(num)),
-                    _ => Err(())
+                    _ => Err(()),
                 }
             }),
         ),

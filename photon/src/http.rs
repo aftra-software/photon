@@ -1,6 +1,10 @@
 use core::str;
 use std::{
-    collections::HashSet, ffi::CStr, mem, sync::OnceLock, time::{Duration, Instant}
+    collections::HashSet,
+    ffi::CStr,
+    mem,
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 use bincode::{Decode, Encode};
@@ -67,8 +71,7 @@ pub(crate) fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> 
                 break;
             }
 
-            let compiled =
-                compile_expression_validated(match_str, &photon_ctx.functions);
+            let compiled = compile_expression_validated(match_str, &photon_ctx.functions);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(ret) = res {
@@ -383,7 +386,7 @@ impl HttpReq {
             body: body.to_string(),
             raw: String::from(""),
             follow_redirects: self.follow_redirects,
-            max_redirects: self.max_redirects
+            max_redirects: self.max_redirects,
         };
 
         let resp = curl_do_request(curl, options, &new_request, &path, body.as_bytes());

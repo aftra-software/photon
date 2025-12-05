@@ -426,16 +426,26 @@ impl Template {
             parent: Some(parent_ctx),
             scope: ContextScope::Template,
         }));
-        for (key, value) in &self.dsl_variables {
-            if let Ok(expr) = compile_expression_validated(value, &photon_ctx.functions) {
-                // Need to make sure not to hold an immutable borrow on ctx after executing
-                let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
-                if let Ok(res) = out {
-                    ctx.borrow_mut().insert(key, res);
+        let mut last_successful = 0;
+        loop {
+            let mut successful = 0;
+            for (key, value) in &self.dsl_variables {
+                if let Ok(expr) = compile_expression_validated(value, &photon_ctx.functions) {
+                    // Need to make sure not to hold an immutable borrow on ctx after executing
+                    let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
+                    if let Ok(res) = out {
+                        ctx.borrow_mut().insert(key, res);
+                        successful += 1;
+                    }
+                } else {
+                    debug!("Failed to compile expression: {value}")
                 }
-            } else {
-                debug!("Failed to compile expression: {value}")
             }
+            // Break when no more variables to compile
+            if successful == last_successful {
+                break;
+            }
+            last_successful = successful;
         }
 
         for http in &self.http {

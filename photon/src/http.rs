@@ -1,10 +1,6 @@
 use core::str;
 use std::{
-    collections::HashSet,
-    ffi::CStr,
-    mem,
-    sync::OnceLock,
-    time::{Duration, Instant},
+    collections::HashSet, ffi::CStr, mem, sync::OnceLock, time::{Duration, Instant}
 };
 
 use bincode::{Decode, Encode};
@@ -61,8 +57,18 @@ pub(crate) fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> 
 
         let mut updated = 0;
         for mat in matches.iter() {
+            let match_str = mat.get(1).unwrap().as_str();
+            // Handle edge case where name of a variable causes parsing ambiguity, e.g. `request-id`
+            // So we first check if a variable exists that matches the entire bracket contents and replace if so.
+            // Same as nuclei.
+            if let Some(matched) = ctx.get(match_str) {
+                baked.replace_range(mat.get(0).unwrap().range(), &matched.to_string());
+                updated += 1;
+                break;
+            }
+
             let compiled =
-                compile_expression_validated(mat.get(1).unwrap().as_str(), &photon_ctx.functions);
+                compile_expression_validated(match_str, &photon_ctx.functions);
             if let Ok(expr) = compiled {
                 let res = expr.execute(&ctx, &photon_ctx.functions);
                 if let Ok(ret) = res {
@@ -174,10 +180,6 @@ fn curl_do_request(
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
     curl.url(path).unwrap();
 
-    if !body.is_empty() {
-        curl.post_fields_copy(body).unwrap();
-    }
-
     match req.method {
         Method::GET => {
             curl.get(true).unwrap();
@@ -225,6 +227,10 @@ fn curl_do_request(
         parsed_headers.append(header).unwrap();
     }
     curl.http_headers(parsed_headers).unwrap();
+
+    if !body.is_empty() {
+        curl.post_fields_copy(body).unwrap();
+    }
 
     let stopwatch = Instant::now();
     // Perform CURL request
@@ -301,9 +307,17 @@ impl HttpReq {
             }
         }
 
+        // We want carriage return instead of only newlines
+        raw_data = raw_data.replace("\n", "\r\n");
+
         // Makes parsing that much more reliable, since HTTP requests end with two newlines
         while !raw_data.ends_with("\n\n") {
             raw_data.push('\n');
+        }
+
+        // TODO: Handle timeout thing properly, for now we strip it away to be able to parse the request
+        if raw_data.starts_with("@timeout") {
+            raw_data = raw_data.split_once("\n").unwrap().1.to_string();
         }
 
         let mut headers = [httparse::EMPTY_HEADER; 64];
@@ -352,7 +366,27 @@ impl HttpReq {
             headers.push(format!("{}: {}", header.name, val_str.unwrap()));
         }
 
-        let resp = curl_do_request(curl, options, self, &path, body.as_bytes());
+        // Build a dummy request from the parsed raw request
+        let new_request = HttpReq {
+            method: match req.method {
+                None => Method::GET,
+                Some("GET") => Method::GET,
+                Some("POST") => Method::POST,
+                Some("DELETE") => Method::DELETE,
+                Some("HEAD") => Method::HEAD,
+                Some("PATCH") => Method::PATCH,
+                Some("OPTIONS") => Method::OPTIONS,
+                Some(_) => Method::GET,
+            },
+            headers,
+            path: path.clone(),
+            body: body.to_string(),
+            raw: String::from(""),
+            follow_redirects: self.follow_redirects,
+            max_redirects: self.max_redirects
+        };
+
+        let resp = curl_do_request(curl, options, &new_request, &path, body.as_bytes());
         if resp.is_some() {
             // Successful request
             *req_counter += 1;

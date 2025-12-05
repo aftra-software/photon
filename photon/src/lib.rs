@@ -279,12 +279,11 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         DslFunction::new(
             1,
             Box::new(|stack: &mut DSLStack| {
-                let max = stack.pop_int()?;
+                let count = stack.pop_int()?;
 
-                // [min, max) like nuclei does, exclusive range
                 let rand_value = rand::thread_rng()
                     .sample_iter(&Alphanumeric)
-                    .take(max as usize)
+                    .take(count as usize)
                     .map(char::from);
 
                 Ok(Value::String(rand_value.collect()))

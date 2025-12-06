@@ -18,6 +18,7 @@ macro_rules! verbose {
 
 pub mod dsl;
 pub mod parser;
+mod util;
 
 use dsl::{DSLStack, Value};
 use std::sync::{Mutex, OnceLock};

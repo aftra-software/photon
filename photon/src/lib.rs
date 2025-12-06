@@ -32,7 +32,7 @@ use photon_dsl::{
     DslFunction,
     dsl::{DSLStack, Value},
 };
-use rand::Rng;
+use rand::{Rng, distributions::Alphanumeric};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -254,6 +254,39 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let rand_value = rand::thread_rng().gen_range(min..max);
 
                 Ok(Value::Int(rand_value))
+            }),
+        ),
+    );
+    functions.insert(
+        "to_number".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let num = stack.pop()?;
+
+                match num {
+                    Value::String(num_str) => {
+                        Ok(Value::Int(num_str.parse::<i64>().map_err(|_| ())?))
+                    }
+                    Value::Int(num) => Ok(Value::Int(num)),
+                    _ => Err(()),
+                }
+            }),
+        ),
+    );
+    functions.insert(
+        "rand_text_alphanumeric".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let count = stack.pop_int()?;
+
+                let rand_value = rand::thread_rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(count as usize)
+                    .map(char::from);
+
+                Ok(Value::String(rand_value.collect()))
             }),
         ),
     );

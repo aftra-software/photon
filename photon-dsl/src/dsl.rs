@@ -3,7 +3,7 @@ use std::fmt::Display;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::{DslFunction, get_config};
+use crate::{DslFunction, get_config, util::get_bracket_pattern};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -717,7 +717,32 @@ where
             Bytecode::Instr(OPCode::LoadConstStr) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(val)) = &bytecode[ptr] {
-                    stack.push(Value::String(val.clone()));
+                    // TODO: Refactor, a bit lame to do the bracket pattern thing this late
+                    // though we do it so late because we don't know when all required variables are available
+                    let mut baked = val.clone();
+                    loop {
+                        let mut changed = false;
+                        let tmp = baked.clone();
+                        let matches: Vec<_> =
+                            get_bracket_pattern().captures_iter(tmp.as_str()).collect();
+
+                        for mat in matches.iter() {
+                            let match_str = mat.get(1).unwrap().as_str();
+                            if let Some(matched) = variables.get(match_str) {
+                                baked.replace_range(
+                                    mat.get(0).unwrap().range(),
+                                    &matched.to_string(),
+                                );
+                                changed = true;
+                                break;
+                            }
+                        }
+                        // End condition
+                        if !changed {
+                            break;
+                        }
+                    }
+                    stack.push(Value::String(baked));
                 } else {
                     debug!(
                         "LoadConstStr called with invalid argument: {:?}",

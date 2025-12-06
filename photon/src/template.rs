@@ -430,7 +430,7 @@ impl Template {
         loop {
             let mut successful = 0;
             for (key, value) in &self.dsl_variables {
-                // If this key already exists, 
+                // If this key already exists,
                 if evaluated.contains(key) {
                     continue;
                 }

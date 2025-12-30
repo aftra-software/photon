@@ -604,7 +604,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         AttackMode::Batteringram
     };
 
-    let mut payloads = FxHashMap::default();
+    let mut payloads = vec![];
 
     if let Some(payloads_map) = yaml["payloads"].as_hash() {
         for (key_yaml, values_yaml) in payloads_map {
@@ -635,7 +635,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
                 })
                 .collect();
 
-            payloads.insert(String::from(key), values);
+            payloads.push((String::from(key), values));
         }
     }
 
@@ -909,12 +909,12 @@ mod tests {
         let templates = TemplateLoader::load_from_path("../test-templates");
         let kval_template = find_template(&templates, "kval-test");
 
-        let payloads: Vec<(&String, &Vec<Value>)> = kval_template.http[0].payloads.iter().collect();
+        let payloads = kval_template.http[0].payloads.clone();
         assert!(
             payloads
                 == vec![(
-                    &String::from("unused-variable"),
-                    &vec![
+                    String::from("unused-variable"),
+                    vec![
                         Value::String(String::from("a")),
                         Value::String(String::from("b"))
                     ]

@@ -11,6 +11,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum MatcherType {
     Word(Vec<String>),
+    Binary(Vec<String>),
     DSL(Vec<CompiledExpression>),
     Regex(Vec<u32>), // indicies into RegexCache
     Status(Vec<u32>),
@@ -200,6 +201,15 @@ impl Matcher {
                         .all(|needle| contains_with_dsl(&data, needle, context, photon_ctx))
                 }
             }
+            MatcherType::Binary(hexs) => {
+                if self.condition == Condition::OR {
+                    hexs.iter()
+                        .any(|needle| contains_with_dsl(&data, needle, context, photon_ctx))
+                } else {
+                    hexs.iter()
+                        .all(|needle| contains_with_dsl(&data, needle, context, photon_ctx))
+                }
+            }
             MatcherType::Status(_) => false,
         }
     }
@@ -253,6 +263,10 @@ impl Extractor {
                         .map(Value::String),
                     MatcherType::Word(_) => {
                         debug!("Extractor does not support Word matching");
+                        None
+                    }
+                    MatcherType::Binary(_) => {
+                        debug!("Extractor does not support Binary matching");
                         None
                     }
                     MatcherType::Status(_) => None,

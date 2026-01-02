@@ -4,7 +4,6 @@ use photon_dsl::{
     dsl::{CompiledExpression, Value},
     parser::compile_expression,
 };
-use rustc_hash::FxHashMap;
 use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -106,6 +105,7 @@ fn map_condition(condition: &str) -> Option<Condition> {
 fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
     match matcher_type.to_lowercase().as_str() {
         "word" => Some(MatcherType::Word(vec![])),
+        "binary" => Some(MatcherType::Binary(vec![])),
         "dsl" => Some(MatcherType::DSL(vec![])),
         "regex" => Some(MatcherType::Regex(vec![])),
         "status" => Some(MatcherType::Status(vec![])),
@@ -146,10 +146,8 @@ fn parse_classification(yaml: &Yaml) -> Option<Classification> {
     let cvss_metrics = yaml["cvss-metrics"].as_str().map(String::from);
     let cvss_score = if let Some(score) = yaml["cvss-score"].as_f64() {
         Some(score)
-    } else if let Some(score) = yaml["cvss-score"].as_i64() {
-        Some(score as f64)
     } else {
-        None
+        yaml["cvss-score"].as_i64().map(|score| score as f64)
     };
 
     // Only return Classification if any of it's recognized fields are set
@@ -233,6 +231,33 @@ fn parse_matcher_type(
                 .map(|item| item.as_str().unwrap().to_string())
                 .collect();
             words.append(&mut words_strings);
+        }
+        MatcherType::Binary(hexs) => {
+            let binary_list = yaml["binary"].as_vec();
+            if binary_list.is_none() {
+                return Err(TemplateError::MissingField("binary".into()));
+            }
+            let mut hex_strings: Vec<String> = binary_list
+                .unwrap()
+                .iter()
+                .filter_map(|item| {
+                    let inp = item
+                        .as_str()
+                        .expect("binary fields should have a list of strings");
+                    let decoded_vec = base16ct::mixed::decode_vec(inp);
+                    match decoded_vec {
+                        Ok(s) => {
+                            let decoded_str = String::from_utf8_lossy(&s);
+                            Some(String::from(decoded_str))
+                        }
+                        Err(_) => {
+                            debug!("Could not hex decode binary string for template. Will skip this value for matching.");
+                            None
+                        }
+                    }
+                })
+                .collect();
+            hexs.append(&mut hex_strings);
         }
         MatcherType::DSL(dsls) => {
             let dsl_list = match yaml["dsl"].as_vec() {
@@ -861,7 +886,7 @@ mod tests {
     fn load_test_templates() {
         // Test is ran inside photon sub-folder, so we go up one folder to find test templates
         let templates = TemplateLoader::load_from_path("../test-templates");
-        assert!(templates.len() == 5);
+        assert!(templates.len() == 6);
 
         let cve_template = find_template(&templates, "CVE-2015-7297");
         assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);
@@ -920,5 +945,31 @@ mod tests {
                     ]
                 )]
         );
+    }
+
+    #[test]
+    fn test_binary_matcher() {
+        use crate::matcher::MatcherType;
+
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        let binary_template = find_template(&templates, "binary-matcher-test");
+
+        assert!(binary_template.http.len() == 1);
+        assert!(binary_template.http[0].matchers.len() == 1);
+
+        let matcher = &binary_template.http[0].matchers[0];
+
+        if let MatcherType::Binary(binary_values) = &matcher.r#type {
+            assert_eq!(binary_values.len(), 4, "Expected 4 binary values");
+            assert_eq!(binary_values[0], "PK\u{3}\u{4}", "ZIP signature mismatch");
+            assert_eq!(binary_values[1], "ustar  \0", "TAR signature mismatch");
+            assert_eq!(binary_values[2], "7z��'\u{1c}", "7z signature mismatch");
+            assert_eq!(
+                binary_values[3], "SQLite format 3\0",
+                "SQLite signature mismatch"
+            );
+        } else {
+            panic!("Expected Binary matcher type");
+        }
     }
 }

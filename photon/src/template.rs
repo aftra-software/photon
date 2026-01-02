@@ -13,6 +13,7 @@ use crate::{
     matcher::{Extractor, Matcher},
     template_executor::ExecutionOptions,
 };
+use itertools::Itertools;
 use photon_dsl::{
     dsl::{Value, VariableContainer},
     parser::compile_expression_validated,
@@ -80,7 +81,7 @@ pub struct Info {
     pub tags: Vec<String>,
 }
 
-type AttackPayloads = FxHashMap<String, Vec<Value>>;
+type AttackPayloads = Vec<(String, Vec<Value>)>;
 
 #[derive(Debug, Clone, Copy)]
 pub enum AttackMode {
@@ -204,32 +205,61 @@ impl Severity {
     }
 }
 
+enum AttackIteratorImpl<'a> {
+    Simple {
+        inner: &'a AttackPayloads,
+        idx: usize,
+        stop_idx: usize,
+    },
+    Clusterbomb {
+        keys: Vec<&'a String>,
+        iter: Box<dyn Iterator<Item = Vec<Value>> + 'a>,
+    },
+    Noop {
+        done: bool,
+    },
+}
+
 struct AttackIterator<'a> {
-    inner: &'a AttackPayloads,
-    is_noop: bool,
-    idx: usize,
-    stop_idx: usize,
-    #[allow(unused)]
-    mode: AttackMode,
+    inner: AttackIteratorImpl<'a>,
 }
 
 impl<'a> AttackIterator<'a> {
     fn new(inner: &'a AttackPayloads, mode: AttackMode) -> Self {
-        // TODO: Different logic for Clusterbomb
-        let is_noop = inner.is_empty();
-        let stop_idx = if !is_noop {
-            inner.values().map(|values| values.len()).min().unwrap_or(0)
-        } else {
-            1 // Return empty vec for 1 iteration when not attacking
+        if inner.is_empty() {
+            return AttackIterator {
+                inner: AttackIteratorImpl::Noop { done: false },
+            };
+        }
+
+        let inner_impl = match mode {
+            AttackMode::Pitchfork | AttackMode::Batteringram => {
+                let stop_idx = inner
+                    .iter()
+                    .map(|(_, values)| values.len())
+                    .min()
+                    .unwrap_or(0);
+                AttackIteratorImpl::Simple {
+                    inner,
+                    idx: 0,
+                    stop_idx,
+                }
+            }
+            AttackMode::Clusterbomb => {
+                let keys: Vec<_> = inner.iter().map(|(k, _)| k).collect();
+                let value_vecs: Vec<&[Value]> = inner.iter().map(|(_, v)| v.as_slice()).collect();
+                let iter = value_vecs
+                    .into_iter()
+                    .multi_cartesian_product()
+                    .map(|combo| combo.into_iter().cloned().collect());
+                AttackIteratorImpl::Clusterbomb {
+                    keys,
+                    iter: Box::new(iter),
+                }
+            }
         };
 
-        AttackIterator {
-            inner,
-            mode,
-            is_noop: inner.is_empty(),
-            idx: 0,
-            stop_idx,
-        }
+        AttackIterator { inner: inner_impl }
     }
 }
 
@@ -237,27 +267,38 @@ impl<'a> Iterator for AttackIterator<'a> {
     type Item = Vec<(String, Value)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx == self.stop_idx {
-            return None;
-        }
-
-        let ret = if self.is_noop {
-            Some(vec![])
-        } else {
-            // TODO: Handle Clusterbomb differently later (all possible combinations of all parameters)
-            // Pitchfork and Batteringram behave the same, Batteringram is for 1 variable, Pitchfork for multiple
-            // So we implement them both in the exact same way.
-            let mut ret = Vec::with_capacity(4);
-            for (key, values) in self.inner {
-                ret.push((key.clone(), values[self.idx].clone()));
+        match &mut self.inner {
+            AttackIteratorImpl::Noop { done } => {
+                if *done {
+                    None
+                } else {
+                    *done = true;
+                    Some(vec![])
+                }
             }
+            AttackIteratorImpl::Simple {
+                inner,
+                idx,
+                stop_idx,
+            } => {
+                if *idx >= *stop_idx {
+                    return None;
+                }
 
-            Some(ret)
-        };
-
-        self.idx += 1;
-
-        ret
+                let mut ret = Vec::with_capacity(inner.len());
+                for (key, values) in inner.iter() {
+                    ret.push((key.clone(), values[*idx].clone()));
+                }
+                *idx += 1;
+                Some(ret)
+            }
+            AttackIteratorImpl::Clusterbomb { keys, iter } => iter.next().map(|values| {
+                keys.iter()
+                    .zip(values)
+                    .map(|(k, v)| ((*k).clone(), v))
+                    .collect()
+            }),
+        }
     }
 }
 
@@ -486,10 +527,11 @@ impl Template {
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
+    use itertools::iproduct;
     use photon_dsl::dsl::Value;
     use rustc_hash::FxHashMap;
 
-    use crate::template::{Context, ContextScope};
+    use crate::template::{AttackIterator, AttackMode, Context, ContextScope};
 
     #[test]
     fn test_insert_in_scope() {
@@ -552,5 +594,49 @@ mod tests {
 
         // This panics because ContextScope::Request can only exist below ContextScope::Template and not above
         template_ctx.insert_in_scope(ContextScope::Request, "blehh", Value::Boolean(false));
+    }
+
+    fn valuestring(s: &str) -> Value {
+        Value::String(String::from(s))
+    }
+
+    #[test]
+    fn test_clusterbomb_iteration() {
+        let username = String::from("username");
+        let password = String::from("password");
+        let method = String::from("method");
+        let payloads = vec![
+            (
+                username.clone(),
+                vec![valuestring("test"), valuestring("admin")],
+            ),
+            (
+                password.clone(),
+                vec![
+                    valuestring("12345"),
+                    valuestring("test"),
+                    valuestring("admin"),
+                ],
+            ),
+            (
+                method.clone(),
+                vec![valuestring("http"), valuestring("https")],
+            ),
+        ];
+
+        let iterator = AttackIterator::new(&payloads, AttackMode::Clusterbomb);
+        let attacks: Vec<_> = iterator.into_iter().collect();
+        assert_eq!(12, attacks.len());
+        for (u, p, m) in iproduct!(
+            ["test", "admin"],
+            ["12345", "test", "admin"],
+            ["http", "https"],
+        ) {
+            assert!(attacks.contains(&vec![
+                (username.clone(), valuestring(u)),
+                (password.clone(), valuestring(p)),
+                (method.clone(), valuestring(m)),
+            ]))
+        }
     }
 }

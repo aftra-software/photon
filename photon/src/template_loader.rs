@@ -886,7 +886,7 @@ mod tests {
     fn load_test_templates() {
         // Test is ran inside photon sub-folder, so we go up one folder to find test templates
         let templates = TemplateLoader::load_from_path("../test-templates");
-        assert!(templates.len() == 5);
+        assert!(templates.len() == 6);
 
         let cve_template = find_template(&templates, "CVE-2015-7297");
         assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);
@@ -945,5 +945,31 @@ mod tests {
                     ]
                 )]
         );
+    }
+
+    #[test]
+    fn test_binary_matcher() {
+        use crate::matcher::MatcherType;
+
+        let templates = TemplateLoader::load_from_path("../test-templates");
+        let binary_template = find_template(&templates, "binary-matcher-test");
+
+        assert!(binary_template.http.len() == 1);
+        assert!(binary_template.http[0].matchers.len() == 1);
+
+        let matcher = &binary_template.http[0].matchers[0];
+
+        if let MatcherType::Binary(binary_values) = &matcher.r#type {
+            assert_eq!(binary_values.len(), 4, "Expected 4 binary values");
+            assert_eq!(binary_values[0], "PK\u{3}\u{4}", "ZIP signature mismatch");
+            assert_eq!(binary_values[1], "ustar  \0", "TAR signature mismatch");
+            assert_eq!(binary_values[2], "7z��'\u{1c}", "7z signature mismatch");
+            assert_eq!(
+                binary_values[3], "SQLite format 3\0",
+                "SQLite signature mismatch"
+            );
+        } else {
+            panic!("Expected Binary matcher type");
+        }
     }
 }

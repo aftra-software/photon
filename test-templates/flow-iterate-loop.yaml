@@ -1,0 +1,40 @@
+id: flow-iterate-loop-test
+
+info:
+  name: Flow Iterate Loop Test
+  author: test
+  severity: info
+
+flow: |
+  http(1)
+  for (let item of iterate(template["items"])) {
+    set("item", item);
+    http(2);
+  }
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/first"
+
+    matchers:
+      - type: status
+        status:
+          - 200
+
+    extractors:
+      - type: regex
+        name: items
+        regex:
+          - '"item":"([^"]+)"'
+        group: 1
+        internal: true
+
+  - method: GET
+    path:
+      - "{{BaseURL}}/{{item}}"
+
+    matchers:
+      - type: status
+        status:
+          - 200

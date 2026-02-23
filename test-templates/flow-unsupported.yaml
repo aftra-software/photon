@@ -1,0 +1,27 @@
+id: flow-unsupported-test
+
+info:
+  name: Flow Unsupported Test
+  author: test
+  severity: info
+
+flow: "if (template.x) { http(1) } else { http(2) }"
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/first"
+
+    matchers:
+      - type: status
+        status:
+          - 200
+
+  - method: GET
+    path:
+      - "{{BaseURL}}/second"
+
+    matchers:
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,27 @@
+id: flow-boolean-chain-test
+
+info:
+  name: Flow Boolean Chain Test
+  author: test
+  severity: info
+
+flow: "http(1) && http(2)"
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/first"
+
+    matchers:
+      - type: status
+        status:
+          - 200
+
+  - method: GET
+    path:
+      - "{{BaseURL}}/second"
+
+    matchers:
+      - type: status
+        status:
+          - 200

@@ -6,12 +6,13 @@ use std::{
 };
 
 use crate::{
-    PhotonContext,
     cache::{Cache, RegexCache},
+    flow::{self, FlowExpression},
     get_config,
     http::{CurlHandle, HttpReq, HttpResponse},
     matcher::{Extractor, Matcher},
     template_executor::ExecutionOptions,
+    PhotonContext,
 };
 use itertools::Itertools;
 use photon_dsl::{
@@ -182,6 +183,7 @@ pub struct Template {
     pub http: Vec<HttpRequest>,
     pub variables: Vec<(String, Value)>,
     pub dsl_variables: Vec<(String, String)>, // DSL variables, lazily compiled
+    pub flow: Option<FlowExpression>,
 }
 
 // TODO: MatchResult values from extractors (figure out how we want to handle that logic as well)
@@ -404,7 +406,7 @@ impl HttpRequest {
         None
     }
 
-    fn execute(
+    pub(crate) fn execute(
         &self,
         base_url: &str,
         options: &ExecutionOptions,
@@ -492,6 +494,56 @@ impl Template {
             if successful == 0 {
                 break;
             }
+        }
+
+        if let Some(flow_expr) = &self.flow {
+            return match flow_expr {
+                FlowExpression::BooleanChain(compiled) => flow::execute_flow_bytecodes(
+                    self,
+                    compiled,
+                    base_url,
+                    options,
+                    curl,
+                    regex_cache,
+                    ctx.clone(),
+                    photon_ctx,
+                    req_counter,
+                    cache,
+                    callback,
+                    continue_predicate,
+                ),
+                FlowExpression::IterateLoop {
+                    init_request,
+                    var_name,
+                    source_key,
+                    loop_request,
+                } => {
+                    let iterate_loop = flow::IterateLoop {
+                        init_request: *init_request,
+                        var_name: var_name.clone(),
+                        source_key: source_key.clone(),
+                        loop_request: *loop_request,
+                    };
+                    flow::execute_iterate_flow(
+                        self,
+                        &iterate_loop,
+                        base_url,
+                        options,
+                        curl,
+                        regex_cache,
+                        ctx.clone(),
+                        photon_ctx,
+                        req_counter,
+                        cache,
+                        callback,
+                        continue_predicate,
+                    )
+                }
+                FlowExpression::Unsupported(raw) => {
+                    debug!("Skipping unsupported flow expression: {raw}");
+                    true
+                }
+            };
         }
 
         for http in &self.http {

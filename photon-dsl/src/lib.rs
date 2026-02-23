@@ -40,6 +40,14 @@ impl DslFunction {
     pub fn new(params: usize, func: DslFunc) -> Self {
         DslFunction { func, params }
     }
+
+    pub fn execute(&self, stack: &mut dsl::DSLStack) -> Result<Value, ()> {
+        (self.func)(stack)
+    }
+
+    pub fn params(&self) -> usize {
+        self.params
+    }
 }
 
 static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
@@ -58,6 +66,10 @@ mod tests {
     use dsl::{Value, VariableContainer};
     use parser::compile_expression;
     use rustc_hash::FxHashMap;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     use crate::parser::compile_expression_validated;
 
@@ -71,6 +83,17 @@ mod tests {
         fn get(&self, _: &str) -> Option<Value> {
             None
         }
+    }
+
+    fn side_effect_function(counter: Arc<AtomicUsize>, return_value: bool) -> DslFunction {
+        DslFunction::new(
+            1,
+            Box::new(move |stack: &mut DSLStack| {
+                let _ = stack.pop()?;
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(Value::Boolean(return_value))
+            }),
+        )
     }
 
     #[test]
@@ -131,5 +154,62 @@ mod tests {
             &functions,
         );
         assert!(compiled.is_err());
+    }
+
+    #[test]
+    fn short_circuit_and() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+        functions.insert(
+            "side_effect".into(),
+            side_effect_function(counter.clone(), true),
+        );
+
+        let compiled = compile_expression_validated("false && side_effect(1)", &functions).unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(false));
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn short_circuit_or() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+        functions.insert(
+            "side_effect".into(),
+            side_effect_function(counter.clone(), false),
+        );
+
+        let compiled = compile_expression_validated("true || side_effect(1)", &functions).unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn non_short_circuit_and_or() {
+        let and_counter = Arc::new(AtomicUsize::new(0));
+        let or_counter = Arc::new(AtomicUsize::new(0));
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+        functions.insert(
+            "and_side_effect".into(),
+            side_effect_function(and_counter.clone(), false),
+        );
+        functions.insert(
+            "or_side_effect".into(),
+            side_effect_function(or_counter.clone(), true),
+        );
+
+        let compiled_and =
+            compile_expression_validated("true && and_side_effect(1)", &functions).unwrap();
+        let res_and = compiled_and.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res_and, Value::Boolean(false));
+        assert_eq!(and_counter.load(Ordering::SeqCst), 1);
+
+        let compiled_or =
+            compile_expression_validated("false || or_side_effect(1)", &functions).unwrap();
+        let res_or = compiled_or.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res_or, Value::Boolean(true));
+        assert_eq!(or_counter.load(Ordering::SeqCst), 1);
     }
 }

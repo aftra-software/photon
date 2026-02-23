@@ -3,7 +3,7 @@ use std::fmt::Display;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::{DslFunction, get_config, util::get_bracket_pattern};
+use crate::{get_config, util::get_bracket_pattern, DslFunction};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OPCode {
@@ -284,12 +284,40 @@ pub fn validate_expr_funcs(expr: &Expr, functions: &FxHashMap<String, DslFunctio
 pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
     match expr {
         Expr::Operator(left, op, right) => {
-            let mut ops = Vec::new();
-            ops.append(&mut compile_bytecode(*left).0);
-            ops.append(&mut compile_bytecode(*right).0);
-            ops.push(Bytecode::Instr(map_op(op)));
+            if matches!(op, Operator::And | Operator::Or) {
+                let mut ops = Vec::new();
+                let mut right_ops = compile_bytecode(*right).0;
 
-            CompiledExpression(ops)
+                ops.append(&mut compile_bytecode(*left).0);
+                if op == Operator::And {
+                    ops.push(Bytecode::Instr(OPCode::Invert));
+                }
+
+                let short_circuit_instr = if op == Operator::And {
+                    Bytecode::Instr(OPCode::LoadConstBoolFalse)
+                } else {
+                    Bytecode::Instr(OPCode::LoadConstBoolTrue)
+                };
+
+                right_ops.push(Bytecode::Instr(OPCode::LoadConstBoolTrue));
+                right_ops.push(Bytecode::Instr(OPCode::ShortJump));
+                right_ops.push(Bytecode::Value(Value::Short(1)));
+
+                ops.push(Bytecode::Instr(OPCode::ShortJump));
+                ops.push(Bytecode::Value(Value::Short(right_ops.len() as i16)));
+
+                ops.append(&mut right_ops);
+                ops.push(short_circuit_instr);
+
+                CompiledExpression(ops)
+            } else {
+                let mut ops = Vec::new();
+                ops.append(&mut compile_bytecode(*left).0);
+                ops.append(&mut compile_bytecode(*right).0);
+                ops.push(Bytecode::Instr(map_op(op)));
+
+                CompiledExpression(ops)
+            }
         }
         Expr::Function(name, variables) => {
             let mut ops = Vec::new();
@@ -404,7 +432,7 @@ pub struct DSLStack {
 
 // TODO: Proper error handling
 impl DSLStack {
-    fn new() -> Self {
+    pub fn new() -> Self {
         DSLStack { inner: Vec::new() }
     }
 
@@ -773,6 +801,10 @@ where
 }
 
 impl CompiledExpression {
+    pub fn bytecode(&self) -> &[Bytecode] {
+        &self.0
+    }
+
     pub fn execute<C>(
         &self,
         variables: &C,

@@ -15,6 +15,7 @@ macro_rules! verbose {
 }
 
 mod cache;
+pub mod flow;
 mod http;
 mod matcher;
 pub mod template;
@@ -49,6 +50,17 @@ pub struct PhotonContext {
 impl PhotonContext {
     pub fn add_function(&mut self, name: &str, func: DslFunction) {
         self.functions.insert(String::from(name), func);
+    }
+
+    pub fn execute_function(
+        &self,
+        name: &str,
+        stack: &mut photon_dsl::dsl::DSLStack,
+    ) -> Result<(usize, Value), ()> {
+        match self.functions.get(name) {
+            Some(f) => Ok((f.params(), f.execute(stack)?)),
+            None => Err(()),
+        }
     }
 }
 

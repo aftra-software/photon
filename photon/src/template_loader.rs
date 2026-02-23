@@ -15,6 +15,7 @@ use crate::{
     template::{
         AttackMode, Classification, Condition, HttpRequest, Info, Method, Severity, Template,
     },
+    flow::{FlowExpression, parse_iterate_pattern},
 };
 
 #[derive(Debug)]
@@ -713,6 +714,43 @@ fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<(String, String)>)
     (variables, dsl_variables)
 }
 
+/// Check if a flow string is a simple boolean chain containing only `http(N)` calls
+/// with boolean operators (`&&`, `||`), negation (`!`), and grouping parentheses.
+fn is_boolean_chain(flow_str: &str) -> bool {
+    // After removing all valid boolean chain tokens, nothing should remain
+    let stripped = regex::Regex::new(r"http\(\d+\)").unwrap().replace_all(flow_str, "");
+    let stripped = stripped.replace("&&", "").replace("||", "");
+    stripped.chars().all(|c| c.is_whitespace() || c == '!' || c == '(' || c == ')')
+}
+
+/// Parse a flow string into a FlowExpression.
+///
+/// Uses a 3-tier approach:
+/// 1. Try Category 1 (boolean chain): compile_expression + validate only http() calls
+/// 2. Try Category 2 (iterate loop): parse_iterate_pattern
+/// 3. Fallback: Unsupported
+fn parse_flow_expression(flow_str: &str) -> FlowExpression {
+    // Category 1: Boolean chain — only http(N) calls with && / ||
+    if is_boolean_chain(flow_str) {
+        if let Ok(compiled) = compile_expression(flow_str) {
+            return FlowExpression::BooleanChain(compiled);
+        }
+    }
+
+    // Category 2: Iterate loop pattern
+    if let Some(iterate) = parse_iterate_pattern(flow_str) {
+        return FlowExpression::IterateLoop {
+            init_request: iterate.init_request,
+            var_name: iterate.var_name,
+            source_key: iterate.source_key,
+            loop_request: iterate.loop_request,
+        };
+    }
+
+    // Fallback: Unsupported (graceful skip, not an error)
+    FlowExpression::Unsupported(flow_str.to_string())
+}
+
 pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Template, TemplateError> {
     let template_yaml = &load_yaml_from_file(file)?[0];
 
@@ -726,19 +764,16 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
 
     let info = parse_info(&template_yaml["info"])?;
 
-    // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean
-    // for if that http request (defined right below) matched
-    // EDIT: The flow is actually JavaScript, which we don't really care for, HOWEVER, most of them should be parseable by us
-    // e.g. flow(1) && flow(2) ...
-    if !template_yaml["flow"].is_badvalue() {
-        if template_yaml["flow"].as_str().is_some() {
-            let dsl = compile_expression(template_yaml["flow"].as_str().unwrap());
-            //println!("{:?} - {}", dsl, template_yaml["flow"].as_str().unwrap());
+    // Parse flow expression if present
+    let flow = if !template_yaml["flow"].is_badvalue() {
+        if let Some(flow_str) = template_yaml["flow"].as_str() {
+            Some(parse_flow_expression(flow_str))
         } else {
             return Err(TemplateError::InvalidValue("flow".into()));
         }
-        return Err(TemplateError::InvalidYaml);
-    }
+    } else {
+        None
+    };
 
     let http_parsed = if template_yaml["http"].is_badvalue() {
         vec![]
@@ -768,12 +803,13 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
     };
 
     Ok(Template {
-        id: id.unwrap().into(),
-        http,
-        info,
-        variables,
-        dsl_variables,
-    })
+            id: id.unwrap().into(),
+            http,
+            info,
+            variables,
+            dsl_variables,
+            flow,
+        })
 }
 
 pub struct TemplateLoader {
@@ -886,7 +922,7 @@ mod tests {
     fn load_test_templates() {
         // Test is ran inside photon sub-folder, so we go up one folder to find test templates
         let templates = TemplateLoader::load_from_path("../test-templates");
-        assert!(templates.len() == 6);
+        assert!(templates.len() == 9);
 
         let cve_template = find_template(&templates, "CVE-2015-7297");
         assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);
@@ -971,5 +1007,128 @@ mod tests {
         } else {
             panic!("Expected Binary matcher type");
         }
+    }
+
+    // --- Flow parsing unit tests ---
+
+    #[test]
+    fn test_is_boolean_chain_simple() {
+        assert!(super::is_boolean_chain("http(1) && http(2)"));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_complex() {
+        assert!(super::is_boolean_chain("http(1) && http(2) || http(3)"));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_negation() {
+        assert!(super::is_boolean_chain("http(1) && !http(2)"));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_grouped() {
+        assert!(super::is_boolean_chain("(http(1) || http(2)) && http(3)"));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_single() {
+        assert!(super::is_boolean_chain("http(1)"));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_rejects_iterate() {
+        assert!(!super::is_boolean_chain(
+            "http(1) for (let x of iterate(template.data)) { set(\"x\", x); http(2); }"
+        ));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_rejects_conditional() {
+        assert!(!super::is_boolean_chain("if (template.x) { http(1) }"));
+    }
+
+    #[test]
+    fn test_is_boolean_chain_rejects_set() {
+        assert!(!super::is_boolean_chain("set(\"x\", 1); http(1)"));
+    }
+
+    #[test]
+    fn test_parse_flow_expression_boolean_chain() {
+        let result = super::parse_flow_expression("http(1) && http(2)");
+        assert!(matches!(result, crate::flow::FlowExpression::BooleanChain(_)));
+    }
+
+    #[test]
+    fn test_parse_flow_expression_iterate_loop() {
+        let flow = "http(1)\nfor (let item of iterate(template[\"items\"])) {\n  set(\"item\", item);\n  http(2);\n}";
+        let result = super::parse_flow_expression(flow);
+        match result {
+            crate::flow::FlowExpression::IterateLoop {
+                init_request,
+                var_name,
+                source_key,
+                loop_request,
+            } => {
+                assert_eq!(init_request, 0);
+                assert_eq!(var_name, "item");
+                assert_eq!(source_key, "items");
+                assert_eq!(loop_request, 1);
+            }
+            other => panic!("Expected IterateLoop, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_flow_expression_unsupported() {
+        let result = super::parse_flow_expression("if (template.x) { http(1) } else { http(2) }");
+        match result {
+            crate::flow::FlowExpression::Unsupported(s) => {
+                assert_eq!(s, "if (template.x) { http(1) } else { http(2) }");
+            }
+            other => panic!("Expected Unsupported, got {:?}", other),
+        }
+    }
+
+    // --- Flow integration tests using load_template ---
+
+    #[test]
+    fn test_load_template_with_boolean_chain_flow() {
+        let mut regex_cache = crate::cache::RegexCache::new();
+        let template = super::load_template("../test-templates/flow-boolean-chain.yaml", &mut regex_cache).unwrap();
+        assert_eq!(template.id, "flow-boolean-chain-test");
+        assert!(matches!(template.flow, Some(crate::flow::FlowExpression::BooleanChain(_))));
+    }
+
+    #[test]
+    fn test_load_template_with_iterate_flow() {
+        let mut regex_cache = crate::cache::RegexCache::new();
+        let template = super::load_template("../test-templates/flow-iterate-loop.yaml", &mut regex_cache).unwrap();
+        assert_eq!(template.id, "flow-iterate-loop-test");
+        match &template.flow {
+            Some(crate::flow::FlowExpression::IterateLoop { init_request, var_name, source_key, loop_request }) => {
+                assert_eq!(*init_request, 0);
+                assert_eq!(var_name, "item");
+                assert_eq!(source_key, "items");
+                assert_eq!(*loop_request, 1);
+            }
+            other => panic!("Expected Some(IterateLoop), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_template_with_unsupported_flow() {
+        let mut regex_cache = crate::cache::RegexCache::new();
+        let template = super::load_template("../test-templates/flow-unsupported.yaml", &mut regex_cache).unwrap();
+        assert_eq!(template.id, "flow-unsupported-test");
+        assert!(matches!(template.flow, Some(crate::flow::FlowExpression::Unsupported(_))));
+    }
+
+    #[test]
+    fn test_load_template_without_flow() {
+        let mut regex_cache = crate::cache::RegexCache::new();
+        let template = super::load_template("../test-templates/test-template.yaml", &mut regex_cache).unwrap();
+        assert_eq!(template.id, "kval-test");
+        assert!(template.flow.is_none());
     }
 }

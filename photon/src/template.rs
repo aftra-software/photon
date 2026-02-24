@@ -404,7 +404,7 @@ impl HttpRequest {
         None
     }
 
-    fn execute(
+    fn execute<C>(
         &self,
         base_url: &str,
         options: &ExecutionOptions,
@@ -414,12 +414,23 @@ impl HttpRequest {
         photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
-    ) -> FxHashSet<MatchResult> {
+        continue_predicate: &Option<C>,
+    ) -> FxHashSet<MatchResult>
+    where
+        C: Fn() -> bool,
+    {
         let payload_contexts = self.all_payload_contexts(parent_ctx);
 
         for mut context in payload_contexts {
             for (idx, req) in self.path.iter().enumerate() {
-                // Signature will become nicer once ExecutorContext refactoring is done
+                // Check if we're supposed to continue scanning or not
+                if let Some(pred) = continue_predicate
+                    && !pred()
+                {
+                    return FxHashSet::default();
+                }
+
+                // XXX: Signature will become nicer once ExecutorContext refactoring is done
                 if let Some(matches) = self.execute_single_request(
                     idx,
                     req,
@@ -496,7 +507,9 @@ impl Template {
 
         for http in &self.http {
             // Check if we're supposed to continue scanning or not
-            if continue_predicate.is_some() && !continue_predicate.as_ref().unwrap()() {
+            if let Some(pred) = continue_predicate
+                && !pred()
+            {
                 return false;
             }
 
@@ -509,6 +522,7 @@ impl Template {
                 photon_ctx,
                 req_counter,
                 cache,
+                continue_predicate,
             );
             // Do a callback for all non-internal matches
             for matched in &match_results {

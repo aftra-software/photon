@@ -107,14 +107,24 @@ pub enum ContextScope {
     Request,
 }
 
+pub type ContextRef = Rc<RefCell<Context>>;
+
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
-    pub parent: Option<Rc<RefCell<Context>>>,
+    pub parent: Option<ContextRef>,
     pub scope: ContextScope,
 }
 
 impl Context {
+    pub fn new_scoped_with_parent(scope: ContextScope, parent: Option<ContextRef>) -> ContextRef {
+        return Rc::from(RefCell::from(Context {
+            variables: FxHashMap::default(),
+            parent: parent,
+            scope: scope,
+        }));
+    }
+
     pub fn insert_str(&mut self, key: &str, value: &str) {
         self.variables
             .insert(key.to_string(), Value::String(value.to_string()));
@@ -355,7 +365,7 @@ impl HttpRequest {
 
     fn all_payload_contexts(
         &self,
-        parent_ctx: Rc<RefCell<Context>>,
+        parent_ctx: ContextRef,
     ) -> impl Iterator<Item = Context> + use<'_> {
         AttackIterator::new(&self.payloads, self.attack_mode).map(move |attack_values| {
             let mut ctx = Context {
@@ -411,7 +421,7 @@ impl HttpRequest {
         options: &ExecutionOptions,
         curl: &mut CurlHandle,
         regex_cache: &RegexCache,
-        parent_ctx: Rc<RefCell<Context>>,
+        parent_ctx: ContextRef,
         photon_ctx: &PhotonContext,
         req_counter: &mut u32,
         cache: &mut Cache,
@@ -462,7 +472,7 @@ impl Template {
         base_url: &str,
         options: &ExecutionOptions,
         curl: &mut CurlHandle,
-        parent_ctx: Rc<RefCell<Context>>,
+        parent_ctx: ContextRef,
         photon_ctx: &PhotonContext, // TODO: we can move parent_ctx into here, options as well
         req_counter: &mut u32,
         cache: &mut Cache,
@@ -474,11 +484,9 @@ impl Template {
         K: Fn(&Template, &MatchResult),
         C: Fn() -> bool,
     {
-        let ctx = Rc::from(RefCell::from(Context {
-            variables: FxHashMap::from_iter(self.variables.iter().cloned()),
-            parent: Some(parent_ctx),
-            scope: ContextScope::Template,
-        }));
+        let ctx = Context::new_scoped_with_parent(ContextScope::Template, Some(parent_ctx));
+        ctx.borrow_mut().variables = FxHashMap::from_iter(self.variables.iter().cloned());
+
         let mut evaluated = FxHashSet::default();
         loop {
             let mut successful = 0;
@@ -540,8 +548,6 @@ impl Template {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc};
-
     use itertools::iproduct;
     use photon_dsl::dsl::Value;
     use rustc_hash::FxHashMap;
@@ -550,23 +556,11 @@ mod tests {
 
     #[test]
     fn test_insert_in_scope() {
-        let global_ctx = Rc::from(RefCell::from(Context {
-            parent: None,
-            variables: FxHashMap::default(),
-            scope: ContextScope::Global,
-        }));
-
-        let template_ctx = Rc::from(RefCell::from(Context {
-            parent: Some(global_ctx),
-            variables: FxHashMap::default(),
-            scope: ContextScope::Template,
-        }));
-
-        let request_ctx = Rc::from(RefCell::from(Context {
-            parent: Some(template_ctx),
-            variables: FxHashMap::default(),
-            scope: ContextScope::Request,
-        }));
+        let global_ctx = Context::new_scoped_with_parent(ContextScope::Global, None);
+        let template_ctx =
+            Context::new_scoped_with_parent(ContextScope::Template, Some(global_ctx));
+        let request_ctx =
+            Context::new_scoped_with_parent(ContextScope::Request, Some(template_ctx));
 
         {
             let mut borrowed = request_ctx.borrow_mut();
@@ -595,11 +589,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_insert_invalid_scope() {
-        let global_ctx = Rc::from(RefCell::from(Context {
-            parent: None,
-            variables: FxHashMap::default(),
-            scope: ContextScope::Global,
-        }));
+        let global_ctx = Context::new_scoped_with_parent(ContextScope::Global, None);
 
         let mut template_ctx = Context {
             parent: Some(global_ctx),

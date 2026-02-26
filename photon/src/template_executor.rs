@@ -1,10 +1,5 @@
-// Manages template execution state
-
-use std::{cell::RefCell, rc::Rc};
-
 use curl::easy::Easy2;
 use rand::distributions::{Alphanumeric, DistString};
-use rustc_hash::FxHashMap;
 use url::Url;
 
 use crate::{
@@ -13,7 +8,7 @@ use crate::{
     get_config,
     http::Collector,
     init_functions,
-    template::{Context, ContextScope, MatchResult, Template},
+    template::{Context, ContextRef, ContextScope, MatchResult, Template},
     template_loader::TemplateLoader,
 };
 
@@ -61,7 +56,7 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
-    ctx: Rc<RefCell<Context>>,
+    ctx: ContextRef,
     photon_ctx: PhotonContext,
     total_reqs: u32,
     cache: Cache,
@@ -80,11 +75,7 @@ where
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
-            ctx: Rc::from(RefCell::from(Context {
-                variables: FxHashMap::default(),
-                parent: None,
-                scope: ContextScope::Global,
-            })),
+            ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
             photon_ctx: PhotonContext {
                 functions: init_functions(),
             },
@@ -102,11 +93,7 @@ where
     // Uses more memory than `from` since it copies the TemplateLoader
     pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
         Self {
-            ctx: Rc::from(RefCell::from(Context {
-                variables: FxHashMap::default(),
-                parent: None,
-                scope: ContextScope::Global,
-            })),
+            ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
             photon_ctx: PhotonContext {
                 functions: init_functions(),
             },

@@ -29,7 +29,7 @@ pub struct Config {
     pub debug: bool,
 }
 
-pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<Value, ()> + Send + Sync>;
+pub type DslFunc = Box<dyn Fn(&mut DSLStack) -> Result<Value, ()>>;
 
 pub struct DslFunction {
     pub(crate) func: DslFunc,

@@ -6,16 +6,15 @@ use std::{
 };
 
 use crate::{
-    PhotonContext,
-    cache::{Cache, RegexCache},
     get_config,
     http::{CurlHandle, HttpReq, HttpResponse},
     matcher::{Extractor, Matcher},
-    template_executor::{ExecutionContext, ExecutionOptions},
+    template_executor::ExecutionContext,
 };
 use itertools::Itertools;
 use photon_dsl::{
-    dsl::{CompiledExpression, Value, VariableContainer},
+    DslFunction,
+    dsl::{CompiledExpression, DSLStack, Value, VariableContainer},
     parser::compile_expression_validated,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -513,6 +512,23 @@ impl Template {
         K: Fn(&Template, &MatchResult),
         C: Fn() -> bool,
     {
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+        functions.insert(
+            "http".into(),
+            DslFunction::new(
+                1,
+                Box::new(|stack: &mut DSLStack| {
+                    let idx = stack.pop_int()?;
+
+                    // TODO: somehow reformat this entire function such that the http requests are done here, and match results are concatenated over all requests depending on DSL function
+                    // e.g. http(1) && http(2) would only match if both http calls match
+                    // but (http(1) && http(2)) || http(3) would only match if both http 1 and 2 match OR if http 3 matches
+
+                    Ok(Value::Boolean(true))
+                }),
+            ),
+        );
+
         for http in &self.http {
             // Check if we're supposed to continue scanning or not
             if let Some(pred) = continue_predicate

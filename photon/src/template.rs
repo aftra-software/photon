@@ -487,12 +487,12 @@ impl Template {
         let ctx = Context::new_scoped_with_parent(ContextScope::Template, Some(parent_ctx));
         ctx.borrow_mut().variables = FxHashMap::from_iter(self.variables.iter().cloned());
 
-        let mut evaluated = FxHashSet::default();
+        // Repeatedly compile template variables since they can rely on each other
         loop {
             let mut successful = 0;
             for (key, value) in &self.dsl_variables {
                 // If this key already exists,
-                if evaluated.contains(key) {
+                if ctx.borrow().contains_key(key) {
                     continue;
                 }
 
@@ -501,7 +501,6 @@ impl Template {
                     let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
                     if let Ok(res) = out {
                         ctx.borrow_mut().insert(key, res);
-                        evaluated.insert(key);
                         successful += 1;
                     }
                 } else {

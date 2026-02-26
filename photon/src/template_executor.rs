@@ -156,29 +156,23 @@ where
         self.cache.reset();
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
-            let parsed: Result<Url, _> = base_url.parse();
+            let url: Url = base_url.parse().map_err(|e| match e {
+                url::ParseError::RelativeUrlWithoutBase => ScanError::MissingScheme,
+                _ => ScanError::UrlParseError,
+            })?;
+            let port = url.port_or_known_default();
             let mut borrowed = self.ctx.borrow_mut();
-            if let Ok(url) = parsed {
-                if let Some(port) = url.port_or_known_default() {
-                    borrowed.insert_int("Port", port as i64);
-                    if let Some(host) = url.host_str() {
-                        let hostname = format!("{host}:{port}");
-                        borrowed.insert_str("Hostname", &hostname);
-                    }
-                }
-                if let Some(hostname) = url.host_str() {
-                    borrowed.insert_str("Host", hostname);
-                }
-                borrowed.insert_str("Scheme", url.scheme());
-                borrowed.insert_str("Path", url.path());
-            } else {
-                match parsed.err().unwrap() {
-                    url::ParseError::RelativeUrlWithoutBase => {
-                        return Err(ScanError::MissingScheme);
-                    }
-                    _ => return Err(ScanError::UrlParseError),
+            if let Some(host) = url.host_str() {
+                borrowed.insert_str("Host", host);
+                if let Some(port) = port {
+                    borrowed.insert_str("Hostname", &format!("{host}:{port}"));
                 }
             }
+            if let Some(port) = port {
+                borrowed.insert_int("Port", port as i64);
+            }
+            borrowed.insert_str("Scheme", url.scheme());
+            borrowed.insert_str("Path", url.path());
             // Base URL is the URL passed in, except documented as full url? but full url != base url
             // So for sanity sake we define Root and Base url as the same.
             borrowed.insert_str("BaseURL", base_url);

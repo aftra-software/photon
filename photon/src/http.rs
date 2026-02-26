@@ -1,7 +1,6 @@
 use core::str;
 use std::{
     collections::HashSet,
-    ffi::CStr,
     mem,
     sync::OnceLock,
     time::{Duration, Instant},

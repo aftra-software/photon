@@ -156,12 +156,13 @@ where
         self.cache.reset();
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
+            let mut borrowed = self.ctx.borrow_mut();
+
             let url: Url = base_url.parse().map_err(|e| match e {
                 url::ParseError::RelativeUrlWithoutBase => ScanError::MissingScheme,
                 _ => ScanError::UrlParseError,
             })?;
             let port = url.port_or_known_default();
-            let mut borrowed = self.ctx.borrow_mut();
             if let Some(host) = url.host_str() {
                 borrowed.insert_str("Host", host);
                 if let Some(port) = port {

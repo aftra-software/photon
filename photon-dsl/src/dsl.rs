@@ -753,13 +753,7 @@ where
             }
             // Handle rest of the OPCodes
             Bytecode::Instr(op) => {
-                let res = handle_op(*op, &mut stack);
-                if let Err(err) = res {
-                    return {
-                        // TODO: proper err
-                        Err(err)
-                    };
-                }
+                handle_op(*op, &mut stack)?;
             }
             Bytecode::Value(_) => {
                 verbose!("Unexpected value while executing bytecode");

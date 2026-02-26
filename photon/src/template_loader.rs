@@ -106,7 +106,7 @@ fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
     match matcher_type.to_lowercase().as_str() {
         "word" => Some(MatcherType::Word(vec![])),
         "binary" => Some(MatcherType::Binary(vec![])),
-        "dsl" => Some(MatcherType::DSL(vec![])),
+        "dsl" => Some(MatcherType::Dsl(vec![])),
         "regex" => Some(MatcherType::Regex(vec![])),
         "status" => Some(MatcherType::Status(vec![])),
         _ => None,
@@ -259,7 +259,7 @@ fn parse_matcher_type(
                 .collect();
             hexs.append(&mut hex_strings);
         }
-        MatcherType::DSL(dsls) => {
+        MatcherType::Dsl(dsls) => {
             let dsl_list = match yaml["dsl"].as_vec() {
                 Some(list) => list,
                 None => return Err(TemplateError::MissingField("dsl".into())),
@@ -403,7 +403,7 @@ pub fn parse_matcher(
         if part_mat.is_none() {
             // Matcher part is not required if matcher type is DSL
             // We also currently ignore missing parts if the match is optional either way
-            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::DSL(_)) {
+            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::Dsl(_)) {
                 return Ok(None);
             } else {
                 return Err(TemplateError::InvalidValue("part".into()));

@@ -333,8 +333,8 @@ impl HttpRequest {
         );
         for extractor in self.extractors.iter() {
             if let Some(name) = &extractor.name {
-                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_ctx) {
-                    ctx.insert_in_scope(ContextScope::Template, &name, res);
+                if let Some(res) = extractor.extract(&resp, regex_cache, ctx, photon_ctx) {
+                    ctx.insert_in_scope(ContextScope::Template, name, res);
                 }
             }
         }
@@ -342,7 +342,7 @@ impl HttpRequest {
         let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
-            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
+            if matcher.negative ^ matcher.matches(&resp, regex_cache, ctx, photon_ctx) {
                 matches.push(MatchResult {
                     matched_url: resp.req_url.clone(),
                     name: matcher.name.clone(),

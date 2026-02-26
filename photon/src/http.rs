@@ -193,32 +193,16 @@ fn curl_do_request(
         // HTTP Methods outside of GET aren't implemented for CURL's Easy wrapper
         // So we interact with the raw curl handle manually, and set the request type to "custom"
         Method::DELETE => unsafe {
-            curl_sys::curl_easy_setopt(
-                curl.raw(),
-                CURLOPT_CUSTOMREQUEST,
-                CStr::from_bytes_with_nul(b"DELETE\0").unwrap(),
-            );
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, c"DELETE");
         },
         Method::HEAD => unsafe {
-            curl_sys::curl_easy_setopt(
-                curl.raw(),
-                CURLOPT_CUSTOMREQUEST,
-                CStr::from_bytes_with_nul(b"HEAD\0").unwrap(),
-            );
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, c"HEAD");
         },
         Method::OPTIONS => unsafe {
-            curl_sys::curl_easy_setopt(
-                curl.raw(),
-                CURLOPT_CUSTOMREQUEST,
-                CStr::from_bytes_with_nul(b"OPTIONS\0").unwrap(),
-            );
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, c"OPTIONS");
         },
         Method::PATCH => unsafe {
-            curl_sys::curl_easy_setopt(
-                curl.raw(),
-                CURLOPT_CUSTOMREQUEST,
-                CStr::from_bytes_with_nul(b"PATCH\0").unwrap(),
-            );
+            curl_sys::curl_easy_setopt(curl.raw(), CURLOPT_CUSTOMREQUEST, c"PATCH");
         },
     }
 

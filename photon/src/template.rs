@@ -11,7 +11,7 @@ use crate::{
     get_config,
     http::{CurlHandle, HttpReq, HttpResponse},
     matcher::{Extractor, Matcher},
-    template_executor::ExecutionOptions,
+    template_executor::{ExecutionContext, ExecutionOptions},
 };
 use itertools::Itertools;
 use photon_dsl::{
@@ -319,8 +319,7 @@ impl HttpRequest {
         resp: HttpResponse,
         idx: usize,
         ctx: &mut Context,
-        regex_cache: &RegexCache,
-        photon_ctx: &PhotonContext,
+        exec_ctx: &mut ExecutionContext,
     ) -> Vec<MatchResult> {
         ctx.insert_str(
             &format!("body_{}", idx + 1),
@@ -343,7 +342,9 @@ impl HttpRequest {
         );
         for extractor in self.extractors.iter() {
             if let Some(name) = &extractor.name {
-                if let Some(res) = extractor.extract(&resp, regex_cache, ctx, photon_ctx) {
+                if let Some(res) =
+                    extractor.extract(&resp, &exec_ctx.regex_cache, ctx, &exec_ctx.photon_ctx)
+                {
                     ctx.insert_in_scope(ContextScope::Template, name, res);
                 }
             }
@@ -352,7 +353,9 @@ impl HttpRequest {
         let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
-            if matcher.negative ^ matcher.matches(&resp, regex_cache, ctx, photon_ctx) {
+            if matcher.negative
+                ^ matcher.matches(&resp, &exec_ctx.regex_cache, ctx, &exec_ctx.photon_ctx)
+            {
                 matches.push(MatchResult {
                     matched_url: resp.req_url.clone(),
                     name: matcher.name.clone(),
@@ -386,16 +389,12 @@ impl HttpRequest {
         idx: usize,
         req: &HttpReq,
         base_url: &str,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
         curl: &mut CurlHandle,
         ctx: &mut Context,
-        photon_ctx: &PhotonContext,
-        req_counter: &mut u32,
-        cache: &mut Cache,
-        regex_cache: &RegexCache,
     ) -> Option<FxHashSet<MatchResult>> {
-        let resp = req.do_request(base_url, options, curl, ctx, photon_ctx, req_counter, cache)?;
-        let matchers_result = self.handle_response(resp, idx, ctx, regex_cache, photon_ctx);
+        let resp = req.do_request(base_url, exec_ctx, curl, ctx)?;
+        let matchers_result = self.handle_response(resp, idx, ctx, exec_ctx);
 
         if !matchers_result.is_empty() {
             match self.matchers_condition {
@@ -418,13 +417,9 @@ impl HttpRequest {
     fn execute<C>(
         &self,
         base_url: &str,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
         curl: &mut CurlHandle,
-        regex_cache: &RegexCache,
         parent_ctx: ContextRef,
-        photon_ctx: &PhotonContext,
-        req_counter: &mut u32,
-        cache: &mut Cache,
         continue_predicate: &Option<C>,
     ) -> FxHashSet<MatchResult>
     where
@@ -441,19 +436,9 @@ impl HttpRequest {
                     return FxHashSet::default();
                 }
 
-                // XXX: Signature will become nicer once ExecutorContext refactoring is done
-                if let Some(matches) = self.execute_single_request(
-                    idx,
-                    req,
-                    base_url,
-                    options,
-                    curl,
-                    &mut context,
-                    photon_ctx,
-                    req_counter,
-                    cache,
-                    regex_cache,
-                ) {
+                if let Some(matches) =
+                    self.execute_single_request(idx, req, base_url, exec_ctx, curl, &mut context)
+                {
                     return matches;
                 }
             }
@@ -464,19 +449,11 @@ impl HttpRequest {
 }
 
 impl Template {
-    // TODO: Look into reducing the number of parameters
-    // e.g. Refactor TemplateExecutor to forward some ExecutorContext with execution info like options, context, caches, request counter etc
-    // There's a lot of stuff we need to pass from a higher context into the templates & requests
     pub fn execute<K, C>(
         &self,
         base_url: &str,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
         curl: &mut CurlHandle,
-        parent_ctx: ContextRef,
-        photon_ctx: &PhotonContext, // TODO: we can move parent_ctx into here, options as well
-        req_counter: &mut u32,
-        cache: &mut Cache,
-        regex_cache: &RegexCache,
         callback: &Option<K>,
         continue_predicate: &Option<C>,
     ) -> bool
@@ -484,7 +461,8 @@ impl Template {
         K: Fn(&Template, &MatchResult),
         C: Fn() -> bool,
     {
-        let ctx = Context::new_scoped_with_parent(ContextScope::Template, Some(parent_ctx));
+        let ctx =
+            Context::new_scoped_with_parent(ContextScope::Template, Some(exec_ctx.ctx.clone()));
         ctx.borrow_mut().variables = FxHashMap::from_iter(self.variables.iter().cloned());
 
         // Repeatedly compile template variables since they can rely on each other
@@ -496,9 +474,11 @@ impl Template {
                     continue;
                 }
 
-                if let Ok(expr) = compile_expression_validated(value, &photon_ctx.functions) {
+                if let Ok(expr) =
+                    compile_expression_validated(value, &exec_ctx.photon_ctx.functions)
+                {
                     // Need to make sure not to hold an immutable borrow on ctx after executing
-                    let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
+                    let out = { expr.execute(&*ctx.borrow(), &exec_ctx.photon_ctx.functions) };
                     if let Ok(res) = out {
                         ctx.borrow_mut().insert(key, res);
                         successful += 1;
@@ -513,6 +493,26 @@ impl Template {
             }
         }
 
+        if self.flow.is_some() {
+            self.flow_execute(base_url, exec_ctx, ctx, curl, callback, continue_predicate)
+        } else {
+            self.normal_execute(base_url, exec_ctx, ctx, curl, callback, continue_predicate)
+        }
+    }
+
+    fn flow_execute<K, C>(
+        &self,
+        base_url: &str,
+        exec_ctx: &mut ExecutionContext,
+        ctx: ContextRef,
+        curl: &mut CurlHandle,
+        callback: &Option<K>,
+        continue_predicate: &Option<C>,
+    ) -> bool
+    where
+        K: Fn(&Template, &MatchResult),
+        C: Fn() -> bool,
+    {
         for http in &self.http {
             // Check if we're supposed to continue scanning or not
             if let Some(pred) = continue_predicate
@@ -521,17 +521,8 @@ impl Template {
                 return false;
             }
 
-            let match_results: FxHashSet<MatchResult> = http.execute(
-                base_url,
-                options,
-                curl,
-                regex_cache,
-                ctx.clone(),
-                photon_ctx,
-                req_counter,
-                cache,
-                continue_predicate,
-            );
+            let match_results: FxHashSet<MatchResult> =
+                http.execute(base_url, exec_ctx, curl, ctx.clone(), continue_predicate);
             // Do a callback for all non-internal matches
             for matched in &match_results {
                 if !matched.internal {
@@ -541,6 +532,43 @@ impl Template {
                 }
             }
         }
+
+        true
+    }
+
+    fn normal_execute<K, C>(
+        &self,
+        base_url: &str,
+        exec_ctx: &mut ExecutionContext,
+        ctx: ContextRef,
+        curl: &mut CurlHandle,
+        callback: &Option<K>,
+        continue_predicate: &Option<C>,
+    ) -> bool
+    where
+        K: Fn(&Template, &MatchResult),
+        C: Fn() -> bool,
+    {
+        for http in &self.http {
+            // Check if we're supposed to continue scanning or not
+            if let Some(pred) = continue_predicate
+                && !pred()
+            {
+                return false;
+            }
+
+            let match_results: FxHashSet<MatchResult> =
+                http.execute(base_url, exec_ctx, curl, ctx.clone(), continue_predicate);
+            // Do a callback for all non-internal matches
+            for matched in &match_results {
+                if !matched.internal {
+                    if let Some(callback) = callback {
+                        callback(self, matched)
+                    }
+                }
+            }
+        }
+
         true
     }
 }

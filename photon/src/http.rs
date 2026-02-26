@@ -21,7 +21,7 @@ use crate::{
     cache::{Cache, CacheKey},
     get_config,
     template::{Context, Method},
-    template_executor::ExecutionOptions,
+    template_executor::{ExecutionContext, ExecutionOptions},
 };
 
 pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();
@@ -280,12 +280,10 @@ impl HttpReq {
         &self,
         base_url: &str,
         ctx: &Context,
-        photon_ctx: &PhotonContext,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
         curl: &mut CurlHandle,
-        req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let mut raw_data = self.bake_raw(ctx, photon_ctx)?;
+        let mut raw_data = self.bake_raw(ctx, &exec_ctx.photon_ctx)?;
         if let Value::String(hostname) = ctx.get("Hostname").unwrap() {
             if !raw_data.contains(&hostname) {
                 // We don't want to do this request, expected hostname is missing
@@ -372,10 +370,16 @@ impl HttpReq {
             max_redirects: self.max_redirects,
         };
 
-        let resp = curl_do_request(curl, options, &new_request, &path, body.as_bytes());
+        let resp = curl_do_request(
+            curl,
+            &exec_ctx.options,
+            &new_request,
+            &path,
+            body.as_bytes(),
+        );
         if resp.is_some() {
             // Successful request
-            *req_counter += 1;
+            exec_ctx.total_reqs += 1;
         }
         resp
     }
@@ -383,18 +387,15 @@ impl HttpReq {
     pub fn do_request(
         &self,
         base_url: &str,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
         curl: &mut CurlHandle,
         ctx: &Context,
-        photon_ctx: &PhotonContext,
-        req_counter: &mut u32,
-        cache: &mut Cache,
     ) -> Option<HttpResponse> {
         if !self.raw.is_empty() {
-            return self.raw_request(base_url, ctx, photon_ctx, options, curl, req_counter);
+            return self.raw_request(base_url, ctx, exec_ctx, curl);
         }
 
-        let path = self.bake(ctx, photon_ctx)?;
+        let path = self.bake(ctx, &exec_ctx.photon_ctx)?;
         if path.is_empty() || !path.contains(base_url) {
             return None;
         }
@@ -405,8 +406,9 @@ impl HttpReq {
         // Skip caching below if we know the request is only happening once
         // XXX: Currently caches all requests, regardless of if their responses are re-used
         let key = CacheKey(self.method, self.headers.clone(), path.clone());
-        if !cache.can_cache(&key) {
-            let res = self.internal_request(&path, options, curl, req_counter);
+        if !exec_ctx.cache.can_cache(&key) {
+            let res =
+                self.internal_request(&path, &exec_ctx.options, curl, &mut exec_ctx.total_reqs);
             if let Some(resp) = res {
                 return Some(resp);
             } else {
@@ -414,15 +416,16 @@ impl HttpReq {
             }
         }
 
-        if !cache.contains(&key) {
-            let res = self.internal_request(&path, options, curl, req_counter);
+        if !exec_ctx.cache.contains(&key) {
+            let res =
+                self.internal_request(&path, &exec_ctx.options, curl, &mut exec_ctx.total_reqs);
             if let Some(resp) = res {
-                cache.store(&key, Some(resp));
+                exec_ctx.cache.store(&key, Some(resp));
             } else {
-                cache.store(&key, None);
+                exec_ctx.cache.store(&key, None);
             }
         }
 
-        cache.get(&key)
+        exec_ctx.cache.get(&key)
     }
 }

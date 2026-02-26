@@ -49,6 +49,15 @@ impl Default for ExecutionOptions {
     }
 }
 
+pub struct ExecutionContext {
+    pub options: ExecutionOptions,
+    pub ctx: ContextRef,
+    pub photon_ctx: PhotonContext,
+    pub total_reqs: u32,
+    pub cache: Cache,
+    pub regex_cache: RegexCache,
+}
+
 pub struct TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
@@ -56,12 +65,7 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
-    ctx: ContextRef,
-    photon_ctx: PhotonContext,
-    total_reqs: u32,
-    cache: Cache,
-    regex_cache: RegexCache,
-    options: ExecutionOptions, // Extra user-facing options, e.g. extra Headers from CLI
+    execution_context: ExecutionContext,
     template_callback: Option<T>,
     match_callback: Option<K>,
     continue_predicate: Option<C>,
@@ -75,45 +79,49 @@ where
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
-            ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
-            photon_ctx: PhotonContext {
-                functions: init_functions(),
-            },
-            total_reqs: 0,
             templates: templ_loader.loaded_templates,
-            cache: templ_loader.cache,
-            regex_cache: templ_loader.regex_cache,
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
-            options: ExecutionOptions::default(),
+            execution_context: ExecutionContext {
+                ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
+                photon_ctx: PhotonContext {
+                    functions: init_functions(),
+                },
+                options: ExecutionOptions::default(),
+                cache: templ_loader.cache,
+                regex_cache: templ_loader.regex_cache,
+                total_reqs: 0,
+            },
         }
     }
 
     // Uses more memory than `from` since it copies the TemplateLoader
     pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
         Self {
-            ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
-            photon_ctx: PhotonContext {
-                functions: init_functions(),
-            },
-            total_reqs: 0,
             templates: templ_loader.loaded_templates.clone(),
-            cache: templ_loader.cache.clone(),
-            regex_cache: templ_loader.regex_cache.clone(),
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
-            options: ExecutionOptions::default(),
+            execution_context: ExecutionContext {
+                ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
+                photon_ctx: PhotonContext {
+                    functions: init_functions(),
+                },
+                options: ExecutionOptions::default(),
+                cache: templ_loader.cache.clone(),
+                regex_cache: templ_loader.regex_cache.clone(),
+                total_reqs: 0,
+            },
         }
     }
 
     pub fn set_options(&mut self, options: ExecutionOptions) {
-        self.options = options;
+        self.execution_context.options = options;
     }
 
     pub fn get_total_reqs(&self) -> u32 {
-        self.total_reqs
+        self.execution_context.total_reqs
     }
 
     pub fn set_callbacks(
@@ -140,10 +148,10 @@ where
         base_url: &str,
         iter_fn: F,
     ) -> ScanResult<()> {
-        self.cache.reset();
+        self.execution_context.cache.reset();
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
-            let mut borrowed = self.ctx.borrow_mut();
+            let mut borrowed = self.execution_context.ctx.borrow_mut();
 
             let url: Url = base_url.parse().map_err(|e| match e {
                 url::ParseError::RelativeUrlWithoutBase => ScanError::MissingScheme,
@@ -171,7 +179,7 @@ where
             debug!("Executing template {}", template.id);
             // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
             {
-                let mut borrowed = self.ctx.borrow_mut();
+                let mut borrowed = self.execution_context.ctx.borrow_mut();
                 borrowed.insert_str(
                     "randstr",
                     &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
@@ -189,18 +197,13 @@ where
 
             let cont = template.execute(
                 base_url,
-                &self.options,
+                &mut self.execution_context,
                 &mut curl,
-                self.ctx.clone(), // Cheap reference clone
-                &self.photon_ctx,
-                &mut self.total_reqs,
-                &mut self.cache,
-                &self.regex_cache,
                 &self.match_callback,
                 &self.continue_predicate,
             );
             if let Some(callback) = &self.template_callback {
-                callback(template, i as u32, self.total_reqs);
+                callback(template, i as u32, self.execution_context.total_reqs);
             }
             if !cont {
                 break;

@@ -15,7 +15,7 @@ use crate::{
 };
 use itertools::Itertools;
 use photon_dsl::{
-    dsl::{Value, VariableContainer},
+    dsl::{CompiledExpression, Value, VariableContainer},
     parser::compile_expression_validated,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -180,6 +180,7 @@ pub struct Template {
     pub id: String,
     pub info: Info,
     pub http: Vec<HttpRequest>,
+    pub flow: Option<CompiledExpression>,
     pub variables: Vec<(String, Value)>,
     pub dsl_variables: Vec<(String, String)>, // DSL variables, lazily compiled
 }

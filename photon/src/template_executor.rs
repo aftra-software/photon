@@ -217,8 +217,8 @@ where
                 &self.match_callback,
                 &self.continue_predicate,
             );
-            if self.template_callback.is_some() {
-                self.template_callback.as_ref().unwrap()(template, i as u32, self.total_reqs);
+            if let Some(callback) = &self.template_callback {
+                callback(template, i as u32, self.total_reqs);
             }
             if !cont {
                 break;

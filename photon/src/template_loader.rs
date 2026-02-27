@@ -886,7 +886,7 @@ mod tests {
     fn load_test_templates() {
         // Test is ran inside photon sub-folder, so we go up one folder to find test templates
         let templates = TemplateLoader::load_from_path("../test-templates");
-        assert!(templates.len() == 6);
+        assert!(templates.len() == 7);
 
         let cve_template = find_template(&templates, "CVE-2015-7297");
         assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);

@@ -18,7 +18,7 @@ use regex::Regex;
 
 use crate::{
     PhotonContext,
-    cache::{Cache, CacheKey},
+    cache::CacheKey,
     get_config,
     template::{Context, Method},
     template_executor::{ExecutionContext, ExecutionOptions},
@@ -281,9 +281,10 @@ impl HttpReq {
         base_url: &str,
         ctx: &Context,
         exec_ctx: &mut ExecutionContext,
+        photon_ctx: &PhotonContext,
         curl: &mut CurlHandle,
     ) -> Option<HttpResponse> {
-        let mut raw_data = self.bake_raw(ctx, &exec_ctx.photon_ctx)?;
+        let mut raw_data = self.bake_raw(ctx, &photon_ctx)?;
         if let Value::String(hostname) = ctx.get("Hostname").unwrap() {
             if !raw_data.contains(&hostname) {
                 // We don't want to do this request, expected hostname is missing
@@ -388,14 +389,15 @@ impl HttpReq {
         &self,
         base_url: &str,
         exec_ctx: &mut ExecutionContext,
+        photon_ctx: &PhotonContext,
         curl: &mut CurlHandle,
         ctx: &Context,
     ) -> Option<HttpResponse> {
         if !self.raw.is_empty() {
-            return self.raw_request(base_url, ctx, exec_ctx, curl);
+            return self.raw_request(base_url, ctx, exec_ctx, photon_ctx, curl);
         }
 
-        let path = self.bake(ctx, &exec_ctx.photon_ctx)?;
+        let path = self.bake(ctx, &photon_ctx)?;
         if path.is_empty() || !path.contains(base_url) {
             return None;
         }

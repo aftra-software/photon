@@ -132,4 +132,175 @@ mod tests {
         );
         assert!(compiled.is_err());
     }
+
+    #[test]
+    fn short_circuit_and() {
+        set_config(Config {
+            verbose: true,
+            debug: true,
+        });
+
+        let call_count = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+
+        let cc = call_count.clone();
+        functions.insert(
+            "side_effect".into(),
+            DslFunction::new(
+                1,
+                Box::new(move |stack: &mut DSLStack| {
+                    let val = stack.pop_bool()?;
+                    cc.set(cc.get() + 1);
+                    Ok(Value::Boolean(val))
+                }),
+            ),
+        );
+
+        // false && side_effect(true): side_effect should NOT be called
+        call_count.set(0);
+        let compiled = compile_expression("false && side_effect(true)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(false));
+        assert_eq!(
+            call_count.get(),
+            0,
+            "side_effect should not be called when left side of && is false"
+        );
+
+        // true && side_effect(false): side_effect SHOULD be called, result is false
+        call_count.set(0);
+        let compiled = compile_expression("true && side_effect(false)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(false));
+        assert_eq!(
+            call_count.get(),
+            1,
+            "side_effect should be called when left side of && is true"
+        );
+
+        // true && side_effect(true): side_effect SHOULD be called, result is true
+        call_count.set(0);
+        let compiled = compile_expression("true && side_effect(true)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(call_count.get(), 1);
+    }
+
+    #[test]
+    fn short_circuit_or() {
+        set_config(Config {
+            verbose: true,
+            debug: true,
+        });
+
+        let call_count = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+
+        let cc = call_count.clone();
+        functions.insert(
+            "side_effect".into(),
+            DslFunction::new(
+                1,
+                Box::new(move |stack: &mut DSLStack| {
+                    let val = stack.pop_bool()?;
+                    cc.set(cc.get() + 1);
+                    Ok(Value::Boolean(val))
+                }),
+            ),
+        );
+
+        // true || side_effect(false): side_effect should NOT be called
+        call_count.set(0);
+        let compiled = compile_expression("true || side_effect(false)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(
+            call_count.get(),
+            0,
+            "side_effect should not be called when left side of || is true"
+        );
+
+        // false || side_effect(true): side_effect SHOULD be called, result is true
+        call_count.set(0);
+        let compiled = compile_expression("false || side_effect(true)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(
+            call_count.get(),
+            1,
+            "side_effect should be called when left side of || is false"
+        );
+
+        // false || side_effect(false): side_effect SHOULD be called, result is false
+        call_count.set(0);
+        let compiled = compile_expression("false || side_effect(false)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(false));
+        assert_eq!(call_count.get(), 1);
+    }
+
+    #[test]
+    fn short_circuit_complex_flow() {
+        set_config(Config {
+            verbose: true,
+            debug: true,
+        });
+
+        let call_count = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+
+        let cc = call_count.clone();
+        functions.insert(
+            "http".into(),
+            DslFunction::new(
+                1,
+                Box::new(move |stack: &mut DSLStack| {
+                    let idx = stack.pop_int()?;
+                    cc.set(cc.get() + 1);
+                    // Simulate: http(1) = true, http(2) = true, http(3) = false
+                    Ok(Value::Boolean(idx != 3))
+                }),
+            ),
+        );
+
+        // http(1) && http(2): both should be called, result true
+        call_count.set(0);
+        let compiled = compile_expression("http(1) && http(2)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(call_count.get(), 2);
+
+        // http(3) && http(1): http(3) returns false, http(1) should NOT be called
+        call_count.set(0);
+        let compiled = compile_expression("http(3) && http(1)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(false));
+        assert_eq!(
+            call_count.get(),
+            1,
+            "http(1) should not be called when http(3) is false"
+        );
+
+        // (http(1) && http(2)) || http(3): left side is true, http(3) should NOT be called
+        call_count.set(0);
+        let compiled = compile_expression("(http(1) && http(2)) || http(3)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(
+            call_count.get(),
+            2,
+            "http(3) should not be called when (http(1) && http(2)) is true"
+        );
+
+        // (http(3) && http(1)) || http(2): left side is false (http(1) skipped), http(2) should be called
+        call_count.set(0);
+        let compiled = compile_expression("(http(3) && http(1)) || http(2)").unwrap();
+        let res = compiled.execute(&NoVariables, &functions).unwrap();
+        assert_eq!(res, Value::Boolean(true));
+        assert_eq!(
+            call_count.get(),
+            2,
+            "http(3) and http(2) should be called, http(1) skipped"
+        );
+    }
 }

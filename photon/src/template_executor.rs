@@ -52,7 +52,6 @@ impl Default for ExecutionOptions {
 pub struct ExecutionContext {
     pub options: ExecutionOptions,
     pub ctx: ContextRef,
-    pub photon_ctx: PhotonContext,
     pub total_reqs: u32,
     pub cache: Cache,
     pub regex_cache: RegexCache,
@@ -65,6 +64,7 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
+    photon_ctx: PhotonContext,
     execution_context: ExecutionContext,
     template_callback: Option<T>,
     match_callback: Option<K>,
@@ -83,11 +83,11 @@ where
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
+            photon_ctx: PhotonContext {
+                functions: init_functions(),
+            },
             execution_context: ExecutionContext {
                 ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
-                photon_ctx: PhotonContext {
-                    functions: init_functions(),
-                },
                 options: ExecutionOptions::default(),
                 cache: templ_loader.cache,
                 regex_cache: templ_loader.regex_cache,
@@ -103,11 +103,11 @@ where
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
+            photon_ctx: PhotonContext {
+                functions: init_functions(),
+            },
             execution_context: ExecutionContext {
                 ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
-                photon_ctx: PhotonContext {
-                    functions: init_functions(),
-                },
                 options: ExecutionOptions::default(),
                 cache: templ_loader.cache.clone(),
                 regex_cache: templ_loader.regex_cache.clone(),
@@ -198,6 +198,7 @@ where
             let cont = template.execute(
                 base_url,
                 &mut self.execution_context,
+                &self.photon_ctx,
                 &mut curl,
                 &self.match_callback,
                 &self.continue_predicate,

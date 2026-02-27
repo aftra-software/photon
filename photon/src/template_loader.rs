@@ -609,7 +609,9 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     } else {
         vec![]
     };
-    let flattened_headers: Vec<String> = headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+    let mut flattened_headers: Vec<String> =
+        headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+    flattened_headers.sort();
 
     let attack_mode = if let Some(attack) = yaml["attack"].as_str() {
         match attack {

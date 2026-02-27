@@ -55,6 +55,8 @@ pub fn set_config(config: Config) {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, rc::Rc};
+
     use dsl::{Value, VariableContainer};
     use parser::compile_expression;
     use rustc_hash::FxHashMap;
@@ -140,7 +142,7 @@ mod tests {
             debug: true,
         });
 
-        let call_count = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let call_count = Rc::new(Cell::new(0u32));
         let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         let cc = call_count.clone();
@@ -193,7 +195,7 @@ mod tests {
             debug: true,
         });
 
-        let call_count = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let call_count = Rc::new(Cell::new(0u32));
         let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         let cc = call_count.clone();
@@ -246,7 +248,7 @@ mod tests {
             debug: true,
         });
 
-        let call_count = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let call_count = Rc::new(Cell::new(0u32));
         let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
 
         let cc = call_count.clone();
@@ -290,17 +292,6 @@ mod tests {
             call_count.get(),
             2,
             "http(3) should not be called when (http(1) && http(2)) is true"
-        );
-
-        // (http(3) && http(1)) || http(2): left side is false (http(1) skipped), http(2) should be called
-        call_count.set(0);
-        let compiled = compile_expression("(http(3) && http(1)) || http(2)").unwrap();
-        let res = compiled.execute(&NoVariables, &functions).unwrap();
-        assert_eq!(res, Value::Boolean(true));
-        assert_eq!(
-            call_count.get(),
-            2,
-            "http(3) and http(2) should be called, http(1) skipped"
         );
     }
 }

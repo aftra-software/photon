@@ -20,15 +20,11 @@ use photon_dsl::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// A DSL function entry with a non-`'static` closure, used for flow execution
-/// where the `http()` function needs to capture local references.
 struct FlowDslFunction<'a> {
     func: Box<dyn Fn(&mut DSLStack) -> Result<Value, ()> + 'a>,
     params: usize,
 }
 
-/// A function provider for flow execution that can hold non-`'static` functions
-/// alongside the static photon context functions.
 struct FlowFunctions<'a> {
     flow_functions: FxHashMap<String, FlowDslFunction<'a>>,
     static_functions: &'a FxHashMap<String, DslFunction>,
@@ -39,11 +35,10 @@ impl<'a> FunctionProvider for FlowFunctions<'a> {
         &self,
         key: &str,
     ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)> {
-        // Flow-specific functions take precedence
+        // Flow-handling functions have priority
         if let Some(f) = self.flow_functions.get(key) {
             Some((f.func.as_ref(), f.params))
         } else {
-            // Delegate to the FunctionProvider impl on FxHashMap<String, DslFunction>
             self.static_functions.get_function(key)
         }
     }

@@ -30,6 +30,7 @@ impl Cache {
         new
     }
 
+    #[allow(unused)]
     fn decrease_token(&mut self, key: &CacheKey) {
         let tokens_left = self.current_tokens.get_mut(key).unwrap();
         if *tokens_left == 1 {
@@ -82,7 +83,7 @@ impl Cache {
         }
     }
 
-    pub fn can_cache(&self, key: &CacheKey) -> bool {
+    pub fn can_cache(&self, _key: &CacheKey) -> bool {
         //self.current_tokens.contains_key(key)
 
         // XXX: Always return true for now, while the caching implementation caches all requests

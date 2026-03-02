@@ -782,6 +782,11 @@ pub struct TemplateLoader {
     pub regex_cache: RegexCache,
 }
 
+pub struct DiskTemplate {
+    pub template: Result<Template, TemplateError>,
+    pub file_path: String,
+}
+
 impl TemplateLoader {
     pub fn len(&self) -> usize {
         self.loaded_templates.len()
@@ -791,11 +796,8 @@ impl TemplateLoader {
         self.len() == 0
     }
 
-    pub fn load_from_path(path: &str) -> Self {
-        let mut total = 0;
-        let mut success = 0;
-
-        let mut loaded_templates = Vec::new();
+    pub fn load_all_from_path(path: &str) -> (Vec<DiskTemplate>, RegexCache) {
+        let mut templates = Vec::new();
         let mut regex_cache = RegexCache::new();
 
         for entry in WalkDir::new(path).into_iter().flatten() {
@@ -804,14 +806,32 @@ impl TemplateLoader {
                 && (extension == "yml" || extension == "yaml")
             {
                 let template = load_template(entry.path().to_str().unwrap(), &mut regex_cache);
-                if let Ok(templ) = template {
-                    success += 1;
-                    loaded_templates.push(templ);
-                } else {
-                    debug!("{:?} - {}", template, entry.path().to_str().unwrap());
-                }
-                total += 1;
+                templates.push(DiskTemplate {
+                    template,
+                    file_path: entry.path().to_str().unwrap().into(),
+                });
             }
+        }
+        regex_cache.finalize();
+
+        (templates, regex_cache)
+    }
+
+    pub fn load_from_path(path: &str) -> Self {
+        let mut total = 0;
+        let mut success = 0;
+
+        let (templates, regex_cache) = Self::load_all_from_path(path);
+
+        let mut loaded_templates = Vec::new();
+        for entry in templates {
+            if let Ok(template) = entry.template {
+                success += 1;
+                loaded_templates.push(template);
+            } else {
+                debug!("{:?} - {}", entry.template, entry.file_path);
+            }
+            total += 1;
         }
         debug!(
             "Successfully loaded template ratio: {}/{} - {:.2}%",
@@ -857,7 +877,6 @@ impl TemplateLoader {
         verbose!("Cached requests: {num_cached}");
 
         let cache = Cache::new(tokens);
-        regex_cache.finalize();
         Self {
             cache,
             regex_cache,

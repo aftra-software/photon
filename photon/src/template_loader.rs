@@ -106,7 +106,7 @@ fn map_matcher_type(matcher_type: &str) -> Option<MatcherType> {
     match matcher_type.to_lowercase().as_str() {
         "word" => Some(MatcherType::Word(vec![])),
         "binary" => Some(MatcherType::Binary(vec![])),
-        "dsl" => Some(MatcherType::DSL(vec![])),
+        "dsl" => Some(MatcherType::Dsl(vec![])),
         "regex" => Some(MatcherType::Regex(vec![])),
         "status" => Some(MatcherType::Status(vec![])),
         _ => None,
@@ -259,7 +259,7 @@ fn parse_matcher_type(
                 .collect();
             hexs.append(&mut hex_strings);
         }
-        MatcherType::DSL(dsls) => {
+        MatcherType::Dsl(dsls) => {
             let dsl_list = match yaml["dsl"].as_vec() {
                 Some(list) => list,
                 None => return Err(TemplateError::MissingField("dsl".into())),
@@ -403,7 +403,7 @@ pub fn parse_matcher(
         if part_mat.is_none() {
             // Matcher part is not required if matcher type is DSL
             // We also currently ignore missing parts if the match is optional either way
-            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::DSL(_)) {
+            if matchers_condition == Condition::OR || matches!(matcher_type, MatcherType::Dsl(_)) {
                 return Ok(None);
             } else {
                 return Err(TemplateError::InvalidValue("part".into()));
@@ -453,16 +453,11 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     let follow_redirects = redirects.is_some_and(identity) || host_redirects.is_some_and(identity);
     let max_redirects = max_redirects.map(|val| val as u32);
 
-    if http_matchers.is_none() {
-        return Err(TemplateError::MissingField("matchers".into()));
-    }
-
-    let method = if http_method.is_some() {
-        let method_ret = map_method(http_method.unwrap());
-        if method_ret.is_none() {
-            return Err(TemplateError::InvalidValue("method".into()));
+    let method = if let Some(method) = http_method {
+        match map_method(method) {
+            Some(method) => method,
+            None => return Err(TemplateError::InvalidValue("method".into())),
         }
-        method_ret.unwrap()
     } else {
         Method::GET
     };
@@ -481,11 +476,14 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         Condition::OR
     };
 
-    let matchers_parsed: Vec<_> = http_matchers
-        .unwrap()
-        .iter()
-        .map(|item| parse_matcher(item, matchers_condition, regex_cache))
-        .collect();
+    let matchers_parsed: Vec<_> = if let Some(matchers) = http_matchers {
+        matchers
+            .iter()
+            .map(|item| parse_matcher(item, matchers_condition, regex_cache))
+            .collect()
+    } else {
+        return Err(TemplateError::MissingField("matchers".into()));
+    };
 
     if matchers_parsed.iter().any(Result::is_err) {
         if matchers_condition == Condition::AND {
@@ -505,9 +503,8 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
 
     let matchers = matchers_parsed.into_iter().flatten().flatten().collect();
 
-    let extractors = if http_extractors.is_some() {
-        let extractors_parsed: Vec<_> = http_extractors
-            .unwrap()
+    let extractors = if let Some(extractors) = http_extractors {
+        let extractors_parsed: Vec<_> = extractors
             .iter()
             .map(|item| parse_extractor(item, regex_cache))
             .collect();
@@ -612,7 +609,9 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     } else {
         vec![]
     };
-    let flattened_headers: Vec<String> = headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+    let mut flattened_headers: Vec<String> =
+        headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+    flattened_headers.sort();
 
     let attack_mode = if let Some(attack) = yaml["attack"].as_str() {
         match attack {
@@ -729,16 +728,16 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
     // TODO: Handle flow, seems to be DSL based, with a functon called http(idx: int) that returns a boolean
     // for if that http request (defined right below) matched
     // EDIT: The flow is actually JavaScript, which we don't really care for, HOWEVER, most of them should be parseable by us
-    // e.g. flow(1) && flow(2) ...
-    if !template_yaml["flow"].is_badvalue() {
-        if template_yaml["flow"].as_str().is_some() {
-            let dsl = compile_expression(template_yaml["flow"].as_str().unwrap());
-            //println!("{:?} - {}", dsl, template_yaml["flow"].as_str().unwrap());
+    // e.g. http(1) && http(2) ...
+    let flow = if !template_yaml["flow"].is_badvalue() {
+        if let Some(flow) = template_yaml["flow"].as_str() {
+            compile_expression(flow).ok()
         } else {
             return Err(TemplateError::InvalidValue("flow".into()));
         }
-        return Err(TemplateError::InvalidYaml);
-    }
+    } else {
+        None
+    };
 
     let http_parsed = if template_yaml["http"].is_badvalue() {
         vec![]
@@ -771,6 +770,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
         id: id.unwrap().into(),
         http,
         info,
+        flow,
         variables,
         dsl_variables,
     })
@@ -905,7 +905,7 @@ mod tests {
     fn load_test_templates() {
         // Test is ran inside photon sub-folder, so we go up one folder to find test templates
         let templates = TemplateLoader::load_from_path("../test-templates");
-        assert!(templates.len() == 6);
+        assert!(templates.len() == 7);
 
         let cve_template = find_template(&templates, "CVE-2015-7297");
         assert!(cve_template.variables == vec![("num".into(), Value::String("999999999".into()))]);

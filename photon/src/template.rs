@@ -2,23 +2,47 @@ use core::str;
 use std::{
     cell::RefCell,
     fmt::{Display, Formatter},
+    hash::Hash,
     rc::Rc,
 };
 
 use crate::{
-    PhotonContext,
-    cache::{Cache, RegexCache},
-    get_config,
+    PhotonContext, get_config,
     http::{CurlHandle, HttpReq, HttpResponse},
     matcher::{Extractor, Matcher},
-    template_executor::ExecutionOptions,
+    template_executor::ExecutionContext,
 };
 use itertools::Itertools;
 use photon_dsl::{
-    dsl::{Value, VariableContainer},
+    DslFunction,
+    dsl::{CompiledExpression, DSLStack, FunctionProvider, Value, VariableContainer},
     parser::compile_expression_validated,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
+
+struct FlowDslFunction<'a> {
+    func: Box<dyn Fn(&mut DSLStack) -> Result<Value, ()> + 'a>,
+    params: usize,
+}
+
+struct FlowFunctions<'a> {
+    flow_functions: FxHashMap<String, FlowDslFunction<'a>>,
+    static_functions: &'a FxHashMap<String, DslFunction>,
+}
+
+impl<'a> FunctionProvider for FlowFunctions<'a> {
+    fn get_function(
+        &self,
+        key: &str,
+    ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)> {
+        // Flow-handling functions have priority
+        if let Some(f) = self.flow_functions.get(key) {
+            Some((f.func.as_ref(), f.params))
+        } else {
+            self.static_functions.get_function(key)
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Severity {
@@ -107,14 +131,24 @@ pub enum ContextScope {
     Request,
 }
 
+pub type ContextRef = Rc<RefCell<Context>>;
+
 #[derive(Debug)]
 pub struct Context {
     pub variables: FxHashMap<String, Value>,
-    pub parent: Option<Rc<RefCell<Context>>>,
+    pub parent: Option<ContextRef>,
     pub scope: ContextScope,
 }
 
 impl Context {
+    pub fn new_scoped_with_parent(scope: ContextScope, parent: Option<ContextRef>) -> ContextRef {
+        return Rc::from(RefCell::from(Context {
+            variables: FxHashMap::default(),
+            parent: parent,
+            scope: scope,
+        }));
+    }
+
     pub fn insert_str(&mut self, key: &str, value: &str) {
         self.variables
             .insert(key.to_string(), Value::String(value.to_string()));
@@ -180,16 +214,31 @@ pub struct Template {
     pub id: String,
     pub info: Info,
     pub http: Vec<HttpRequest>,
+    pub flow: Option<CompiledExpression>,
     pub variables: Vec<(String, Value)>,
     pub dsl_variables: Vec<(String, String)>, // DSL variables, lazily compiled
 }
 
 // TODO: MatchResult values from extractors (figure out how we want to handle that logic as well)
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Eq)]
 pub struct MatchResult {
     pub name: Option<String>,
     pub matched_url: String,
     pub internal: bool,
+}
+
+// Deduplicate based on name + internal only, since otherwise we get duplicates for flow-based templates
+impl Hash for MatchResult {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.internal.hash(state);
+    }
+}
+
+impl PartialEq for MatchResult {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.internal == other.internal
+    }
 }
 
 impl Severity {
@@ -308,7 +357,7 @@ impl HttpRequest {
         resp: HttpResponse,
         idx: usize,
         ctx: &mut Context,
-        regex_cache: &RegexCache,
+        exec_ctx: &mut ExecutionContext,
         photon_ctx: &PhotonContext,
     ) -> Vec<MatchResult> {
         ctx.insert_str(
@@ -332,8 +381,9 @@ impl HttpRequest {
         );
         for extractor in self.extractors.iter() {
             if let Some(name) = &extractor.name {
-                if let Some(res) = extractor.extract(&resp, regex_cache, &ctx, photon_ctx) {
-                    ctx.insert_in_scope(ContextScope::Template, &name, res);
+                if let Some(res) = extractor.extract(&resp, &exec_ctx.regex_cache, ctx, &photon_ctx)
+                {
+                    ctx.insert_in_scope(ContextScope::Template, name, res);
                 }
             }
         }
@@ -341,7 +391,7 @@ impl HttpRequest {
         let mut matches = Vec::new();
         for matcher in self.matchers.iter() {
             // Negative XOR matches
-            if matcher.negative ^ matcher.matches(&resp, regex_cache, &ctx, photon_ctx) {
+            if matcher.negative ^ matcher.matches(&resp, &exec_ctx.regex_cache, ctx, &photon_ctx) {
                 matches.push(MatchResult {
                     matched_url: resp.req_url.clone(),
                     name: matcher.name.clone(),
@@ -354,7 +404,7 @@ impl HttpRequest {
 
     fn all_payload_contexts(
         &self,
-        parent_ctx: Rc<RefCell<Context>>,
+        parent_ctx: ContextRef,
     ) -> impl Iterator<Item = Context> + use<'_> {
         AttackIterator::new(&self.payloads, self.attack_mode).map(move |attack_values| {
             let mut ctx = Context {
@@ -375,16 +425,13 @@ impl HttpRequest {
         idx: usize,
         req: &HttpReq,
         base_url: &str,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
+        photon_ctx: &PhotonContext,
         curl: &mut CurlHandle,
         ctx: &mut Context,
-        photon_ctx: &PhotonContext,
-        req_counter: &mut u32,
-        cache: &mut Cache,
-        regex_cache: &RegexCache,
     ) -> Option<FxHashSet<MatchResult>> {
-        let resp = req.do_request(base_url, options, curl, ctx, photon_ctx, req_counter, cache)?;
-        let matchers_result = self.handle_response(resp, idx, ctx, regex_cache, photon_ctx);
+        let resp = req.do_request(base_url, exec_ctx, photon_ctx, curl, ctx)?;
+        let matchers_result = self.handle_response(resp, idx, ctx, exec_ctx, photon_ctx);
 
         if !matchers_result.is_empty() {
             match self.matchers_condition {
@@ -407,13 +454,10 @@ impl HttpRequest {
     fn execute<C>(
         &self,
         base_url: &str,
-        options: &ExecutionOptions,
-        curl: &mut CurlHandle,
-        regex_cache: &RegexCache,
-        parent_ctx: Rc<RefCell<Context>>,
+        exec_ctx: &mut ExecutionContext,
         photon_ctx: &PhotonContext,
-        req_counter: &mut u32,
-        cache: &mut Cache,
+        curl: &mut CurlHandle,
+        parent_ctx: ContextRef,
         continue_predicate: &Option<C>,
     ) -> FxHashSet<MatchResult>
     where
@@ -430,18 +474,14 @@ impl HttpRequest {
                     return FxHashSet::default();
                 }
 
-                // XXX: Signature will become nicer once ExecutorContext refactoring is done
                 if let Some(matches) = self.execute_single_request(
                     idx,
                     req,
                     base_url,
-                    options,
+                    exec_ctx,
+                    photon_ctx,
                     curl,
                     &mut context,
-                    photon_ctx,
-                    req_counter,
-                    cache,
-                    regex_cache,
                 ) {
                     return matches;
                 }
@@ -453,19 +493,12 @@ impl HttpRequest {
 }
 
 impl Template {
-    // TODO: Look into reducing the number of parameters
-    // e.g. Refactor TemplateExecutor to forward some ExecutorContext with execution info like options, context, caches, request counter etc
-    // There's a lot of stuff we need to pass from a higher context into the templates & requests
     pub fn execute<K, C>(
         &self,
         base_url: &str,
-        options: &ExecutionOptions,
+        exec_ctx: &mut ExecutionContext,
+        photon_ctx: &PhotonContext,
         curl: &mut CurlHandle,
-        parent_ctx: Rc<RefCell<Context>>,
-        photon_ctx: &PhotonContext, // TODO: we can move parent_ctx into here, options as well
-        req_counter: &mut u32,
-        cache: &mut Cache,
-        regex_cache: &RegexCache,
         callback: &Option<K>,
         continue_predicate: &Option<C>,
     ) -> bool
@@ -473,17 +506,16 @@ impl Template {
         K: Fn(&Template, &MatchResult),
         C: Fn() -> bool,
     {
-        let ctx = Rc::from(RefCell::from(Context {
-            variables: FxHashMap::from_iter(self.variables.iter().cloned()),
-            parent: Some(parent_ctx),
-            scope: ContextScope::Template,
-        }));
-        let mut evaluated = FxHashSet::default();
+        let ctx =
+            Context::new_scoped_with_parent(ContextScope::Template, Some(exec_ctx.ctx.clone()));
+        ctx.borrow_mut().variables = FxHashMap::from_iter(self.variables.iter().cloned());
+
+        // Repeatedly compile template variables since they can rely on each other
         loop {
             let mut successful = 0;
             for (key, value) in &self.dsl_variables {
                 // If this key already exists,
-                if evaluated.contains(key) {
+                if ctx.borrow().contains_key(key) {
                     continue;
                 }
 
@@ -492,7 +524,6 @@ impl Template {
                     let out = { expr.execute(&*ctx.borrow(), &photon_ctx.functions) };
                     if let Ok(res) = out {
                         ctx.borrow_mut().insert(key, res);
-                        evaluated.insert(key);
                         successful += 1;
                     }
                 } else {
@@ -505,6 +536,149 @@ impl Template {
             }
         }
 
+        if self.flow.is_some() {
+            self.flow_execute(
+                base_url,
+                exec_ctx,
+                photon_ctx,
+                ctx,
+                curl,
+                callback,
+                continue_predicate,
+            )
+        } else {
+            self.normal_execute(
+                base_url,
+                exec_ctx,
+                photon_ctx,
+                ctx,
+                curl,
+                callback,
+                continue_predicate,
+            )
+        }
+    }
+
+    fn flow_execute<K, C>(
+        &self,
+        base_url: &str,
+        exec_ctx: &mut ExecutionContext,
+        photon_ctx: &PhotonContext,
+        ctx: ContextRef,
+        curl: &mut CurlHandle,
+        callback: &Option<K>,
+        continue_predicate: &Option<C>,
+    ) -> bool
+    where
+        K: Fn(&Template, &MatchResult),
+        C: Fn() -> bool,
+    {
+        // Wrap mutable references in RefCells so the Fn closure can mutate them.
+        let exec_ctx = RefCell::new(exec_ctx);
+        let curl = RefCell::new(curl);
+        // Accumulate all match results across http() calls
+        let all_matches: RefCell<FxHashSet<MatchResult>> = RefCell::new(FxHashSet::default());
+
+        let mut flow_functions: FxHashMap<String, FlowDslFunction<'_>> = FxHashMap::default();
+        flow_functions.insert(
+            "http".into(),
+            FlowDslFunction {
+                params: 1,
+                func: Box::new(|stack: &mut DSLStack| {
+                    let idx = stack.pop_int()? as usize;
+
+                    // Check continue predicate before making a request
+                    if let Some(pred) = continue_predicate
+                        && !pred()
+                    {
+                        return Ok(Value::Boolean(false));
+                    }
+
+                    // http(1) refers to self.http[0], http(2) to self.http[1], etc.
+                    let http_idx = idx.checked_sub(1).ok_or_else(|| {
+                        debug!("Flow references http(0), indices are 1-based");
+                    })?;
+                    let http_req = match self.http.get(http_idx) {
+                        Some(req) => req,
+                        None => {
+                            debug!(
+                                "Flow references http({}) but only {} http blocks exist",
+                                idx,
+                                self.http.len()
+                            );
+                            return Ok(Value::Boolean(false));
+                        }
+                    };
+
+                    let match_results: FxHashSet<MatchResult> = http_req.execute(
+                        base_url,
+                        &mut *exec_ctx.borrow_mut(),
+                        photon_ctx,
+                        &mut *curl.borrow_mut(),
+                        ctx.clone(),
+                        continue_predicate,
+                    );
+
+                    let matched = !match_results.is_empty();
+
+                    // Accumulate matches for later callback processing
+                    all_matches.borrow_mut().extend(match_results);
+
+                    Ok(Value::Boolean(matched))
+                }),
+            },
+        );
+
+        let functions = FlowFunctions {
+            flow_functions,
+            static_functions: &photon_ctx.functions,
+        };
+
+        // Execute the flow expression — the http() calls happen during evaluation.
+        // Short-circuit evaluation ensures only relevant http() calls are made.
+        let flow_expr = self.flow.as_ref().unwrap();
+        let result = flow_expr.execute(&*ctx.borrow(), &functions);
+
+        let flow_matched = match result {
+            Ok(Value::Boolean(matched)) => matched,
+            Ok(other) => {
+                debug!("Flow expression returned non-boolean value: {:?}", other);
+                false
+            }
+            Err(()) => {
+                debug!("Flow expression execution failed");
+                false
+            }
+        };
+
+        // Only fire callbacks if the overall flow expression evaluated to true.
+        if flow_matched {
+            for matched in all_matches.borrow().iter() {
+                if !matched.internal {
+                    if let Some(callback) = callback {
+                        callback(self, matched);
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
+    fn normal_execute<K, C>(
+        &self,
+        base_url: &str,
+        exec_ctx: &mut ExecutionContext,
+        photon_ctx: &PhotonContext,
+        ctx: ContextRef,
+        curl: &mut CurlHandle,
+        callback: &Option<K>,
+        continue_predicate: &Option<C>,
+    ) -> bool
+    where
+        K: Fn(&Template, &MatchResult),
+        C: Fn() -> bool,
+    {
         for http in &self.http {
             // Check if we're supposed to continue scanning or not
             if let Some(pred) = continue_predicate
@@ -515,13 +689,10 @@ impl Template {
 
             let match_results: FxHashSet<MatchResult> = http.execute(
                 base_url,
-                options,
-                curl,
-                regex_cache,
-                ctx.clone(),
+                exec_ctx,
                 photon_ctx,
-                req_counter,
-                cache,
+                curl,
+                ctx.clone(),
                 continue_predicate,
             );
             // Do a callback for all non-internal matches
@@ -533,14 +704,13 @@ impl Template {
                 }
             }
         }
+
         true
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc};
-
     use itertools::iproduct;
     use photon_dsl::dsl::Value;
     use rustc_hash::FxHashMap;
@@ -549,23 +719,11 @@ mod tests {
 
     #[test]
     fn test_insert_in_scope() {
-        let global_ctx = Rc::from(RefCell::from(Context {
-            parent: None,
-            variables: FxHashMap::default(),
-            scope: ContextScope::Global,
-        }));
-
-        let template_ctx = Rc::from(RefCell::from(Context {
-            parent: Some(global_ctx),
-            variables: FxHashMap::default(),
-            scope: ContextScope::Template,
-        }));
-
-        let request_ctx = Rc::from(RefCell::from(Context {
-            parent: Some(template_ctx),
-            variables: FxHashMap::default(),
-            scope: ContextScope::Request,
-        }));
+        let global_ctx = Context::new_scoped_with_parent(ContextScope::Global, None);
+        let template_ctx =
+            Context::new_scoped_with_parent(ContextScope::Template, Some(global_ctx));
+        let request_ctx =
+            Context::new_scoped_with_parent(ContextScope::Request, Some(template_ctx));
 
         {
             let mut borrowed = request_ctx.borrow_mut();
@@ -594,11 +752,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_insert_invalid_scope() {
-        let global_ctx = Rc::from(RefCell::from(Context {
-            parent: None,
-            variables: FxHashMap::default(),
-            scope: ContextScope::Global,
-        }));
+        let global_ctx = Context::new_scoped_with_parent(ContextScope::Global, None);
 
         let mut template_ctx = Context {
             parent: Some(global_ctx),

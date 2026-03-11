@@ -315,7 +315,7 @@ mod tests {
         let compiled = compile_expression(expr);
         assert!(compiled.is_ok());
 
-        let res = compiled.unwrap().execute(&NoVariables, &fns);
+        let res = compiled.unwrap().execute(&NoVariables, fns);
         assert!(res.is_ok());
         res.unwrap() == Value::Boolean(true)
     }

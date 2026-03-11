@@ -1,10 +1,5 @@
-// Manages template execution state
-
-use std::{cell::RefCell, rc::Rc};
-
 use curl::easy::Easy2;
 use rand::distributions::{Alphanumeric, DistString};
-use rustc_hash::FxHashMap;
 use url::Url;
 
 use crate::{
@@ -13,7 +8,7 @@ use crate::{
     get_config,
     http::Collector,
     init_functions,
-    template::{Context, ContextScope, MatchResult, Template},
+    template::{Context, ContextRef, ContextScope, MatchResult, Template},
     template_loader::TemplateLoader,
 };
 
@@ -54,6 +49,14 @@ impl Default for ExecutionOptions {
     }
 }
 
+pub struct ExecutionContext {
+    pub options: ExecutionOptions,
+    pub ctx: ContextRef,
+    pub total_reqs: u32,
+    pub cache: Cache,
+    pub regex_cache: RegexCache,
+}
+
 pub struct TemplateExecutor<T, K, C>
 where
     T: Fn(&Template, u32, u32),
@@ -61,12 +64,8 @@ where
     C: Fn() -> bool,
 {
     pub templates: Vec<Template>,
-    ctx: Rc<RefCell<Context>>,
     photon_ctx: PhotonContext,
-    total_reqs: u32,
-    cache: Cache,
-    regex_cache: RegexCache,
-    options: ExecutionOptions, // Extra user-facing options, e.g. extra Headers from CLI
+    execution_context: ExecutionContext,
     template_callback: Option<T>,
     match_callback: Option<K>,
     continue_predicate: Option<C>,
@@ -80,53 +79,49 @@ where
 {
     pub fn from(templ_loader: TemplateLoader) -> Self {
         Self {
-            ctx: Rc::from(RefCell::from(Context {
-                variables: FxHashMap::default(),
-                parent: None,
-                scope: ContextScope::Global,
-            })),
-            photon_ctx: PhotonContext {
-                functions: init_functions(),
-            },
-            total_reqs: 0,
             templates: templ_loader.loaded_templates,
-            cache: templ_loader.cache,
-            regex_cache: templ_loader.regex_cache,
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
-            options: ExecutionOptions::default(),
+            photon_ctx: PhotonContext {
+                functions: init_functions(),
+            },
+            execution_context: ExecutionContext {
+                ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
+                options: ExecutionOptions::default(),
+                cache: templ_loader.cache,
+                regex_cache: templ_loader.regex_cache,
+                total_reqs: 0,
+            },
         }
     }
 
     // Uses more memory than `from` since it copies the TemplateLoader
     pub fn from_ref(templ_loader: &TemplateLoader) -> Self {
         Self {
-            ctx: Rc::from(RefCell::from(Context {
-                variables: FxHashMap::default(),
-                parent: None,
-                scope: ContextScope::Global,
-            })),
-            photon_ctx: PhotonContext {
-                functions: init_functions(),
-            },
-            total_reqs: 0,
             templates: templ_loader.loaded_templates.clone(),
-            cache: templ_loader.cache.clone(),
-            regex_cache: templ_loader.regex_cache.clone(),
             template_callback: None,
             match_callback: None,
             continue_predicate: None,
-            options: ExecutionOptions::default(),
+            photon_ctx: PhotonContext {
+                functions: init_functions(),
+            },
+            execution_context: ExecutionContext {
+                ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
+                options: ExecutionOptions::default(),
+                cache: templ_loader.cache.clone(),
+                regex_cache: templ_loader.regex_cache.clone(),
+                total_reqs: 0,
+            },
         }
     }
 
     pub fn set_options(&mut self, options: ExecutionOptions) {
-        self.options = options;
+        self.execution_context.options = options;
     }
 
     pub fn get_total_reqs(&self) -> u32 {
-        self.total_reqs
+        self.execution_context.total_reqs
     }
 
     pub fn set_callbacks(
@@ -153,32 +148,27 @@ where
         base_url: &str,
         iter_fn: F,
     ) -> ScanResult<()> {
-        self.cache.reset();
+        self.execution_context.cache.reset();
         let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
         {
-            let parsed: Result<Url, _> = base_url.parse();
-            let mut borrowed = self.ctx.borrow_mut();
-            if let Ok(url) = parsed {
-                if let Some(port) = url.port_or_known_default() {
-                    borrowed.insert_int("Port", port as i64);
-                    if let Some(host) = url.host_str() {
-                        let hostname = format!("{host}:{port}");
-                        borrowed.insert_str("Hostname", &hostname);
-                    }
-                }
-                if let Some(hostname) = url.host_str() {
-                    borrowed.insert_str("Host", hostname);
-                }
-                borrowed.insert_str("Scheme", url.scheme());
-                borrowed.insert_str("Path", url.path());
-            } else {
-                match parsed.err().unwrap() {
-                    url::ParseError::RelativeUrlWithoutBase => {
-                        return Err(ScanError::MissingScheme);
-                    }
-                    _ => return Err(ScanError::UrlParseError),
+            let mut borrowed = self.execution_context.ctx.borrow_mut();
+
+            let url: Url = base_url.parse().map_err(|e| match e {
+                url::ParseError::RelativeUrlWithoutBase => ScanError::MissingScheme,
+                _ => ScanError::UrlParseError,
+            })?;
+            let port = url.port_or_known_default();
+            if let Some(host) = url.host_str() {
+                borrowed.insert_str("Host", host);
+                if let Some(port) = port {
+                    borrowed.insert_str("Hostname", &format!("{host}:{port}"));
                 }
             }
+            if let Some(port) = port {
+                borrowed.insert_int("Port", port as i64);
+            }
+            borrowed.insert_str("Scheme", url.scheme());
+            borrowed.insert_str("Path", url.path());
             // Base URL is the URL passed in, except documented as full url? but full url != base url
             // So for sanity sake we define Root and Base url as the same.
             borrowed.insert_str("BaseURL", base_url);
@@ -189,7 +179,7 @@ where
             debug!("Executing template {}", template.id);
             // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
             {
-                let mut borrowed = self.ctx.borrow_mut();
+                let mut borrowed = self.execution_context.ctx.borrow_mut();
                 borrowed.insert_str(
                     "randstr",
                     &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
@@ -207,18 +197,14 @@ where
 
             let cont = template.execute(
                 base_url,
-                &self.options,
-                &mut curl,
-                self.ctx.clone(), // Cheap reference clone
+                &mut self.execution_context,
                 &self.photon_ctx,
-                &mut self.total_reqs,
-                &mut self.cache,
-                &self.regex_cache,
+                &mut curl,
                 &self.match_callback,
                 &self.continue_predicate,
             );
-            if self.template_callback.is_some() {
-                self.template_callback.as_ref().unwrap()(template, i as u32, self.total_reqs);
+            if let Some(callback) = &self.template_callback {
+                callback(template, i as u32, self.execution_context.total_reqs);
             }
             if !cont {
                 break;

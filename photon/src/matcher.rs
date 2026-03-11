@@ -12,7 +12,7 @@ use crate::{
 pub enum MatcherType {
     Word(Vec<String>),
     Binary(Vec<String>),
-    DSL(Vec<CompiledExpression>),
+    Dsl(Vec<CompiledExpression>),
     Regex(Vec<u32>), // indicies into RegexCache
     Status(Vec<u32>),
 }
@@ -166,7 +166,7 @@ impl Matcher {
 
         let data = response_to_string(data, self.part);
         match &self.r#type {
-            MatcherType::DSL(dsls) => {
+            MatcherType::Dsl(dsls) => {
                 if self.condition == Condition::OR {
                     dsls.iter().any(|expr| {
                         let res = expr.execute(&context, &photon_ctx.functions);
@@ -246,7 +246,7 @@ impl Extractor {
 
                 let data = extractor_part_to_string(data, self.part);
                 match &matcher {
-                    MatcherType::DSL(dsls) => dsls
+                    MatcherType::Dsl(dsls) => dsls
                         .iter()
                         .filter_map(|expr| expr.execute(&context, &photon_ctx.functions).ok())
                         .next(),

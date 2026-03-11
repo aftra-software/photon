@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{DslFunction, get_config, util::get_bracket_pattern};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OPCode {
     // Basic Operators
     LoadVar = 1,
@@ -72,7 +72,7 @@ impl Display for Value {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Bytecode {
     Instr(OPCode),
     Value(Value),
@@ -283,6 +283,63 @@ pub fn validate_expr_funcs(expr: &Expr, functions: &FxHashMap<String, DslFunctio
 
 pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
     match expr {
+        Expr::Operator(left, Operator::And, right) => {
+            // Short-circuit AND: if left is false, skip right and push false
+            let mut ops = Vec::new();
+            let mut right_bytecode = compile_bytecode(*right).0;
+
+            // Evaluate left operand
+            ops.append(&mut compile_bytecode(*left).0);
+
+            // If left is false, invert to true and jump over right side
+            ops.push(Bytecode::Instr(OPCode::Invert));
+            ops.push(Bytecode::Instr(OPCode::ShortJump));
+            // Jump offset: skip right_bytecode + 3 instructions (LoadTrue, ShortJump, Short(1))
+            ops.push(Bytecode::Value(Value::Short(
+                (right_bytecode.len() + 3) as i16,
+            )));
+
+            // Evaluate right operand (only reached if left was true)
+            ops.append(&mut right_bytecode);
+
+            // Unconditional jump over the false push
+            ops.push(Bytecode::Instr(OPCode::LoadConstBoolTrue));
+            ops.push(Bytecode::Instr(OPCode::ShortJump));
+            ops.push(Bytecode::Value(Value::Short(1)));
+
+            // Short-circuit result: false (only reached if left was false)
+            ops.push(Bytecode::Instr(OPCode::LoadConstBoolFalse));
+
+            CompiledExpression(ops)
+        }
+        Expr::Operator(left, Operator::Or, right) => {
+            // Short-circuit OR: if left is true, skip right and push true
+            let mut ops = Vec::new();
+            let mut right_bytecode = compile_bytecode(*right).0;
+
+            // Evaluate left operand
+            ops.append(&mut compile_bytecode(*left).0);
+
+            // If left is true, jump over right side (no Invert needed)
+            ops.push(Bytecode::Instr(OPCode::ShortJump));
+            // Jump offset: skip right_bytecode + 3 instructions (LoadTrue, ShortJump, Short(1))
+            ops.push(Bytecode::Value(Value::Short(
+                (right_bytecode.len() + 3) as i16,
+            )));
+
+            // Evaluate right operand (only reached if left was false)
+            ops.append(&mut right_bytecode);
+
+            // Unconditional jump over the true push
+            ops.push(Bytecode::Instr(OPCode::LoadConstBoolTrue));
+            ops.push(Bytecode::Instr(OPCode::ShortJump));
+            ops.push(Bytecode::Value(Value::Short(1)));
+
+            // Short-circuit result: true (only reached if left was true)
+            ops.push(Bytecode::Instr(OPCode::LoadConstBoolTrue));
+
+            CompiledExpression(ops)
+        }
         Expr::Operator(left, op, right) => {
             let mut ops = Vec::new();
             ops.append(&mut compile_bytecode(*left).0);
@@ -567,6 +624,21 @@ fn handle_op(op: OPCode, stack: &mut DSLStack) -> Result<(), ()> {
             stack.push(Value::Boolean(!matched));
             Ok(())
         }
+        OPCode::BinAnd => {
+            let b = stack.pop()?;
+            let a = stack.pop()?;
+            match (a, b) {
+                (Value::Boolean(a), Value::Boolean(b)) => {
+                    stack.push(Value::Boolean(a & b));
+                    Ok(())
+                }
+                (Value::Int(a), Value::Int(b)) => {
+                    stack.push(Value::Int(a & b));
+                    Ok(())
+                }
+                _ => Err(()),
+            }
+        }
         OPCode::And => {
             let b = stack.pop_bool()?;
             let a = stack.pop_bool()?;
@@ -613,13 +685,30 @@ pub trait VariableContainer {
     fn get(&self, key: &str) -> Option<Value>;
 }
 
-fn execute_bytecode<C>(
+pub trait FunctionProvider {
+    fn get_function(
+        &self,
+        key: &str,
+    ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)>;
+}
+
+impl FunctionProvider for FxHashMap<String, DslFunction> {
+    fn get_function(
+        &self,
+        key: &str,
+    ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)> {
+        self.get(key).map(|f| (f.func.as_ref(), f.params))
+    }
+}
+
+fn execute_bytecode<C, F>(
     compiled: &CompiledExpression,
     variables: &C,
-    functions: &FxHashMap<String, DslFunction>,
+    functions: &F,
 ) -> Result<Value, ()>
 where
     C: VariableContainer,
+    F: FunctionProvider,
 {
     let mut stack = DSLStack::new();
     let bytecode = &compiled.0;
@@ -630,21 +719,21 @@ where
             Bytecode::Instr(OPCode::CallFunc) => {
                 ptr += 1;
                 if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    match functions.get(key) {
-                        Some(f) => {
+                    match functions.get_function(key) {
+                        Some((func, params)) => {
                             // TODO: Using a DslStackView-type approach might be better when we add richer errors.
                             // see https://github.com/aftra-software/photon/pull/15#discussion_r2071749326
                             let stack_len = stack.len();
 
-                            let ret = (f.func)(&mut stack)?;
+                            let ret = func(&mut stack)?;
 
-                            // Verify that the function popped exactly f.params values off the stack
-                            if stack.len() != stack_len - f.params {
+                            // Verify that the function popped exactly params values off the stack
+                            if stack.len() != stack_len - params {
                                 debug!(
                                     "Function {} popped {} values off the stack, expected {} popped.",
                                     key,
                                     stack_len - stack.len(),
-                                    f.params
+                                    params
                                 );
                                 return Err(());
                             }
@@ -753,13 +842,7 @@ where
             }
             // Handle rest of the OPCodes
             Bytecode::Instr(op) => {
-                let res = handle_op(*op, &mut stack);
-                if let Err(err) = res {
-                    return {
-                        // TODO: proper err
-                        Err(err)
-                    };
-                }
+                handle_op(*op, &mut stack)?;
             }
             Bytecode::Value(_) => {
                 verbose!("Unexpected value while executing bytecode");
@@ -773,13 +856,10 @@ where
 }
 
 impl CompiledExpression {
-    pub fn execute<C>(
-        &self,
-        variables: &C,
-        functions: &FxHashMap<String, DslFunction>,
-    ) -> Result<Value, ()>
+    pub fn execute<C, F>(&self, variables: &C, functions: &F) -> Result<Value, ()>
     where
         C: VariableContainer,
+        F: FunctionProvider,
     {
         execute_bytecode(self, variables, functions)
     }

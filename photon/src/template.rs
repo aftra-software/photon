@@ -637,7 +637,10 @@ impl Template {
         // Execute the flow expression — the http() calls happen during evaluation.
         // Short-circuit evaluation ensures only relevant http() calls are made.
         let flow_expr = self.flow.as_ref().unwrap();
-        let result = flow_expr.execute(&*ctx.borrow(), &functions);
+        let result = flow_expr.execute(
+            &*Context::new_scoped_with_parent(ContextScope::Global, None).borrow(),
+            &functions,
+        );
 
         let flow_matched = match result {
             Ok(Value::Boolean(matched)) => matched,

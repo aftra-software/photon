@@ -1,20 +1,8 @@
 use core::str;
 use std::{
-    collections::HashSet,
     mem,
-    sync::OnceLock,
     time::{Duration, Instant},
 };
-
-use bincode::{Decode, Encode};
-use curl::easy::{Easy2, Handler, List, WriteError};
-use curl_sys::CURLOPT_CUSTOMREQUEST;
-use httparse::Status;
-use photon_dsl::{
-    dsl::{Value, VariableContainer},
-    parser::compile_expression_validated,
-};
-use regex::Regex;
 
 use crate::{
     PhotonContext,
@@ -22,13 +10,13 @@ use crate::{
     get_config,
     template::{Context, Method},
     template_executor::{ExecutionContext, ExecutionOptions},
+    template_string::{TemplateHeader, TemplateString},
 };
-
-pub static BRACKET_PATTERN: OnceLock<Regex> = OnceLock::new();
-
-pub fn get_bracket_pattern() -> &'static Regex {
-    BRACKET_PATTERN.get_or_init(|| Regex::new(r"\{\{([^{}]*)}}").unwrap())
-}
+use bincode::{Decode, Encode};
+use curl::easy::{Easy2, Handler, List, WriteError};
+use curl_sys::CURLOPT_CUSTOMREQUEST;
+use httparse::Status;
+use photon_dsl::dsl::{Value, VariableContainer};
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct HttpResponse {
@@ -42,64 +30,12 @@ pub struct HttpResponse {
 #[derive(Debug, Clone)]
 pub struct HttpReq {
     pub method: Method,
-    pub headers: Vec<String>,
-    pub path: String,
-    pub body: String,
-    pub raw: String,
+    pub headers: Vec<TemplateHeader>,
+    pub path: TemplateString,
+    pub body: TemplateString,
+    pub raw: Option<TemplateString>,
     pub follow_redirects: bool,
     pub max_redirects: Option<u32>,
-}
-
-pub(crate) fn bake_ctx(inp: &str, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
-    let mut baked = inp.to_string();
-    // TODO: Might be worth refactoring some of the code below.
-    // Upper bound of 100 for bake_ctx, just to prevent any infinite-loops from self-creating expressions.
-    for _ in 0..100 {
-        let tmp = baked.clone();
-        let matches: Vec<_> = get_bracket_pattern().captures_iter(tmp.as_str()).collect();
-
-        let mut updated = 0;
-        for mat in matches.iter() {
-            let match_str = mat.get(1).unwrap().as_str();
-            // Handle edge case where name of a variable causes parsing ambiguity, e.g. `request-id`
-            // So we first check if a variable exists that matches the entire bracket contents and replace if so.
-            // Same as nuclei.
-            if let Some(matched) = ctx.get(match_str) {
-                baked.replace_range(mat.get(0).unwrap().range(), &matched.to_string());
-                updated += 1;
-                break;
-            }
-
-            let compiled = compile_expression_validated(match_str, &photon_ctx.functions);
-            if let Ok(expr) = compiled {
-                let res = expr.execute(&ctx, &photon_ctx.functions);
-                if let Ok(ret) = res {
-                    // Replace one at a time to prevent things like {{rand_int(0, 100)}} giving always the same result in two places.
-                    baked.replace_range(mat.get(0).unwrap().range(), &ret.to_string());
-                    updated += 1;
-                    break;
-                }
-            }
-        }
-        // End condition, when no more patterns match/can be replaced
-        if updated == 0 {
-            if !matches.is_empty() {
-                let unique = matches
-                    .iter()
-                    .map(|m| m.get(1).unwrap().as_str().to_string())
-                    .collect::<HashSet<String>>();
-                verbose!(
-                    "Skipping, {} missing parameters: [{}]",
-                    unique.len(),
-                    unique.into_iter().collect::<Vec<String>>().join(", ")
-                );
-                return None;
-            }
-            break;
-        }
-    }
-
-    Some(baked)
 }
 
 fn parse_headers(contents: &[u8]) -> Option<Vec<(String, String)>> {
@@ -149,7 +85,10 @@ pub(crate) type CurlHandle = Easy2<Collector>;
 fn curl_do_request(
     curl: &mut CurlHandle,
     options: &ExecutionOptions,
-    req: &HttpReq,
+    method: Method,
+    headers: &[String],
+    follow_redirects: bool,
+    max_redirects: Option<u32>,
     path: &str,
     body: &[u8],
 ) -> Option<HttpResponse> {
@@ -171,10 +110,10 @@ fn curl_do_request(
     // TODO: Handle host-redirects that only redirect on same host,
     // Curl doesn't natively support such behavior, so we might have to do some Location header shenanigans
     // Using the Collector. For now, both host-redirects and redirects behave the same
-    curl.follow_location(req.follow_redirects).unwrap();
+    curl.follow_location(follow_redirects).unwrap();
     // TODO: max_redirections param is incorrect, so for now we use an optional u32
     // see https://github.com/alexcrichton/curl-rust/issues/603
-    if let Some(max_redirects) = req.max_redirects {
+    if let Some(max_redirects) = max_redirects {
         curl.max_redirections(max_redirects).unwrap();
     }
     curl.http_09_allowed(true).unwrap(); // Release builds run into http 0.9 not allowed errors, but dev builds not for some reason
@@ -182,7 +121,7 @@ fn curl_do_request(
     curl.timeout(Duration::from_secs(10)).unwrap(); // Max 10 seconds for entire request, TODO: Make configurable
     curl.url(path).unwrap();
 
-    match req.method {
+    match method {
         Method::GET => {
             curl.get(true).unwrap();
         }
@@ -206,7 +145,7 @@ fn curl_do_request(
     }
 
     let mut parsed_headers = List::new();
-    for header in &req.headers {
+    for header in headers {
         parsed_headers.append(header).unwrap();
     }
     for header in &options.extra_headers {
@@ -252,23 +191,25 @@ fn curl_do_request(
 }
 
 impl HttpReq {
-    /// Bakes the request with variables from `ctx`, returning the populated request path.
-    pub fn bake(&self, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
-        bake_ctx(&self.path, ctx, photon_ctx)
-    }
-
-    pub fn bake_raw(&self, ctx: &Context, photon_ctx: &PhotonContext) -> Option<String> {
-        bake_ctx(&self.raw, ctx, photon_ctx)
-    }
-
     fn internal_request(
         &self,
         path: &str,
+        headers: &[String],
+        body: &[u8],
         options: &ExecutionOptions,
         curl: &mut CurlHandle,
         req_counter: &mut u32,
     ) -> Option<HttpResponse> {
-        let resp = curl_do_request(curl, options, self, path, self.body.as_bytes());
+        let resp = curl_do_request(
+            curl,
+            options,
+            self.method,
+            headers,
+            self.follow_redirects,
+            self.max_redirects,
+            path,
+            body,
+        );
         if resp.is_some() {
             // Successful request
             *req_counter += 1;
@@ -284,8 +225,8 @@ impl HttpReq {
         photon_ctx: &PhotonContext,
         curl: &mut CurlHandle,
     ) -> Option<HttpResponse> {
-        let mut raw_data = self.bake_raw(ctx, &photon_ctx)?;
-        if let Value::String(hostname) = ctx.get("Hostname").unwrap() {
+        let mut raw_data = self.raw.as_ref()?.bake(ctx, photon_ctx).ok()?;
+        if let Value::String(hostname) = ctx.get("Hostname")? {
             if !raw_data.contains(&hostname) {
                 // We don't want to do this request, expected hostname is missing
                 return None;
@@ -352,29 +293,24 @@ impl HttpReq {
         }
 
         // Build a dummy request from the parsed raw request
-        let new_request = HttpReq {
-            method: match req.method {
-                None => Method::GET,
-                Some("GET") => Method::GET,
-                Some("POST") => Method::POST,
-                Some("DELETE") => Method::DELETE,
-                Some("HEAD") => Method::HEAD,
-                Some("PATCH") => Method::PATCH,
-                Some("OPTIONS") => Method::OPTIONS,
-                Some(_) => Method::GET,
-            },
-            headers,
-            path: path.clone(),
-            body: body.to_string(),
-            raw: String::from(""),
-            follow_redirects: self.follow_redirects,
-            max_redirects: self.max_redirects,
+        let method = match req.method {
+            None => Method::GET,
+            Some("GET") => Method::GET,
+            Some("POST") => Method::POST,
+            Some("DELETE") => Method::DELETE,
+            Some("HEAD") => Method::HEAD,
+            Some("PATCH") => Method::PATCH,
+            Some("OPTIONS") => Method::OPTIONS,
+            Some(_) => Method::GET,
         };
 
         let resp = curl_do_request(
             curl,
             &exec_ctx.options,
-            &new_request,
+            method,
+            &headers,
+            self.follow_redirects,
+            self.max_redirects,
             &path,
             body.as_bytes(),
         );
@@ -393,24 +329,46 @@ impl HttpReq {
         curl: &mut CurlHandle,
         ctx: &Context,
     ) -> Option<HttpResponse> {
-        if !self.raw.is_empty() {
+        if self.raw.is_some() {
             return self.raw_request(base_url, ctx, exec_ctx, photon_ctx, curl);
         }
 
-        let path = self.bake(ctx, &photon_ctx)?;
+        let path = self.path.bake(ctx, photon_ctx).ok()?;
         if path.is_empty() || !path.contains(base_url) {
             return None;
         }
 
         // Some templates accidentally add an extra space to the url somehow
         let path = path.trim().to_string();
+        let body = self.body.bake(ctx, photon_ctx).ok()?;
+        let headers = self
+            .headers
+            .iter()
+            .map(|header| header.bake(ctx, photon_ctx))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
 
         // Skip caching below if we know the request is only happening once
         // XXX: Currently caches all requests, regardless of if their responses are re-used
-        let key = CacheKey(self.method, self.headers.clone(), path.clone());
+        let key = CacheKey {
+            method: self.method,
+            headers: headers.clone(),
+            path: path.clone(),
+            body: body.as_bytes().to_vec(),
+            follow_redirects: self.follow_redirects,
+            max_redirects: self.max_redirects,
+            extra_headers: exec_ctx.options.extra_headers.clone(),
+            user_agent: exec_ctx.options.user_agent.clone(),
+        };
         if !exec_ctx.cache.can_cache(&key) {
-            let res =
-                self.internal_request(&path, &exec_ctx.options, curl, &mut exec_ctx.total_reqs);
+            let res = self.internal_request(
+                &path,
+                &headers,
+                body.as_bytes(),
+                &exec_ctx.options,
+                curl,
+                &mut exec_ctx.total_reqs,
+            );
             if let Some(resp) = res {
                 return Some(resp);
             } else {
@@ -419,8 +377,14 @@ impl HttpReq {
         }
 
         if !exec_ctx.cache.contains(&key) {
-            let res =
-                self.internal_request(&path, &exec_ctx.options, curl, &mut exec_ctx.total_reqs);
+            let res = self.internal_request(
+                &path,
+                &headers,
+                body.as_bytes(),
+                &exec_ctx.options,
+                curl,
+                &mut exec_ctx.total_reqs,
+            );
             if let Some(resp) = res {
                 exec_ctx.cache.store(&key, Some(resp));
             } else {
@@ -429,5 +393,115 @@ impl HttpReq {
         }
 
         exec_ctx.cache.get(&key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
+    use curl::easy::Easy2;
+    use rustc_hash::FxHashMap;
+
+    use super::{Collector, HttpReq};
+    use crate::{
+        PhotonContext,
+        cache::{Cache, RegexCache},
+        init_functions,
+        template::{Context, ContextScope, Method},
+        template_executor::{ExecutionContext, ExecutionOptions},
+        template_string::{TemplateHeader, TemplateString},
+    };
+
+    #[test]
+    fn structured_request_bakes_before_sending_and_caching() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for stream in listener.incoming().take(2) {
+                let mut stream = stream.unwrap();
+                let mut data = Vec::new();
+                let mut buffer = [0; 1024];
+                loop {
+                    let read = stream.read(&mut buffer).unwrap();
+                    data.extend_from_slice(&buffer[..read]);
+                    let headers_end = data
+                        .windows(4)
+                        .position(|window| window == b"\r\n\r\n")
+                        .map(|position| position + 4);
+                    let Some(headers_end) = headers_end else {
+                        continue;
+                    };
+                    let headers = String::from_utf8_lossy(&data[..headers_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if data.len() >= headers_end + content_length {
+                        break;
+                    }
+                }
+                requests.push(String::from_utf8(data).unwrap());
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .unwrap();
+            }
+            requests
+        });
+
+        let base_url = format!("http://{address}");
+        let request = HttpReq {
+            method: Method::POST,
+            headers: vec![TemplateHeader::new("X-Token", "{{token}}")],
+            path: TemplateString::from(format!("{base_url}/login")),
+            body: TemplateString::from("username={{username}}"),
+            raw: None,
+            follow_redirects: false,
+            max_redirects: None,
+        };
+        let mut exec_ctx = ExecutionContext {
+            options: ExecutionOptions::default(),
+            ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
+            total_reqs: 0,
+            cache: Cache::new(Default::default()),
+            regex_cache: RegexCache::new(),
+        };
+        let photon_ctx = PhotonContext {
+            functions: init_functions(),
+        };
+        let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
+
+        for (username, token) in [("admin", "first"), ("root", "second"), ("admin", "first")] {
+            let mut ctx = Context {
+                variables: FxHashMap::default(),
+                parent: None,
+                scope: ContextScope::Request,
+            };
+            ctx.insert_str("username", username);
+            ctx.insert_str("token", token);
+            assert!(
+                request
+                    .do_request(&base_url, &mut exec_ctx, &photon_ctx, &mut curl, &ctx)
+                    .is_some()
+            );
+        }
+
+        let requests = server.join().unwrap();
+        assert_eq!(exec_ctx.total_reqs, 2);
+        assert!(requests[0].contains("X-Token: first"));
+        assert!(requests[0].ends_with("username=admin"));
+        assert!(requests[1].contains("X-Token: second"));
+        assert!(requests[1].ends_with("username=root"));
     }
 }

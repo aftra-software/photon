@@ -8,8 +8,17 @@ use rustc_hash::FxHashMap;
 use crate::{http::HttpResponse, template::Method};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-// (Method, Headers, Path)
-pub struct CacheKey(pub Method, pub Vec<String>, pub String);
+// The complete rendered request state that can affect the response.
+pub struct CacheKey {
+    pub method: Method,
+    pub headers: Vec<String>,
+    pub path: String,
+    pub body: Vec<u8>,
+    pub follow_redirects: bool,
+    pub max_redirects: Option<u32>,
+    pub extra_headers: Vec<String>,
+    pub user_agent: String,
+}
 
 #[derive(Clone)]
 pub struct Cache {

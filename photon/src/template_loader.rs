@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::identity, fmt::Debug, fs};
+use std::{convert::identity, fmt::Debug, fs};
 
 use photon_dsl::{
     dsl::{CompiledExpression, Value},
@@ -8,13 +8,14 @@ use walkdir::WalkDir;
 use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::{
-    cache::{Cache, CacheKey, RegexCache},
+    cache::{Cache, RegexCache},
     get_config,
-    http::{HttpReq, get_bracket_pattern},
+    http::HttpReq,
     matcher::{Extractor, ExtractorPart, ExtractorType, Matcher, MatcherType, ResponsePart},
     template::{
         AttackMode, Classification, Condition, HttpRequest, Info, Method, Severity, Template,
     },
+    template_string::{TemplateHeader, TemplateString, get_bracket_pattern},
 };
 
 #[derive(Debug)]
@@ -225,10 +226,10 @@ fn parse_matcher_type(
             if words_list.is_none() {
                 return Err(TemplateError::MissingField("words".into()));
             }
-            let mut words_strings: Vec<String> = words_list
+            let mut words_strings: Vec<TemplateString> = words_list
                 .unwrap()
                 .iter()
-                .map(|item| item.as_str().unwrap().to_string())
+                .map(|item| TemplateString::from(item.as_str().unwrap()))
                 .collect();
             words.append(&mut words_strings);
         }
@@ -237,7 +238,7 @@ fn parse_matcher_type(
             if binary_list.is_none() {
                 return Err(TemplateError::MissingField("binary".into()));
             }
-            let mut hex_strings: Vec<String> = binary_list
+            let mut hex_strings: Vec<TemplateString> = binary_list
                 .unwrap()
                 .iter()
                 .filter_map(|item| {
@@ -248,7 +249,7 @@ fn parse_matcher_type(
                     match decoded_vec {
                         Ok(s) => {
                             let decoded_str = String::from_utf8_lossy(&s);
-                            Some(String::from(decoded_str))
+                            Some(TemplateString::from(String::from(decoded_str)))
                         }
                         Err(_) => {
                             debug!("Could not hex decode binary string for template. Will skip this value for matching.");
@@ -528,9 +529,9 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .iter()
             .map(|item| HttpReq {
                 method,
-                body: body.clone(),
-                path: item.as_str().unwrap().to_string(),
-                raw: String::new(),
+                body: TemplateString::from(body.clone()),
+                path: TemplateString::from(item.as_str().unwrap()),
+                raw: None,
                 headers: Vec::new(),
                 follow_redirects,
                 max_redirects,
@@ -543,9 +544,9 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .split_terminator('\n')
             .map(|item| HttpReq {
                 method,
-                body: body.clone(),
-                path: item.to_string(),
-                raw: String::new(),
+                body: TemplateString::from(body.clone()),
+                path: TemplateString::from(item),
+                raw: None,
                 headers: Vec::new(),
                 follow_redirects,
                 max_redirects,
@@ -562,9 +563,9 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
             .iter()
             .map(|item| HttpReq {
                 method,
-                body: body.clone(),
-                path: String::new(),
-                raw: item.as_str().unwrap().to_string(),
+                body: TemplateString::from(body.clone()),
+                path: TemplateString::default(),
+                raw: Some(TemplateString::from(item.as_str().unwrap())),
                 headers: Vec::new(),
                 follow_redirects,
                 max_redirects,
@@ -573,9 +574,9 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     } else if yaml["raw"].as_str().is_some() {
         vec![HttpReq {
             method,
-            body: body.clone(),
-            path: String::new(),
-            raw: yaml["raw"].as_str().unwrap().into(),
+            body: TemplateString::from(body.clone()),
+            path: TemplateString::default(),
+            raw: Some(TemplateString::from(yaml["raw"].as_str().unwrap())),
             headers: Vec::new(),
             follow_redirects,
             max_redirects,
@@ -584,7 +585,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
         vec![]
     };
 
-    let headers = if yaml["headers"].as_hash().is_some() {
+    let mut headers = if yaml["headers"].as_hash().is_some() {
         if yaml["headers"]
             .as_hash()
             .unwrap()
@@ -609,9 +610,11 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     } else {
         vec![]
     };
-    let mut flattened_headers: Vec<String> =
-        headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
-    flattened_headers.sort();
+    headers.sort_by(|a, b| a.0.cmp(&b.0));
+    let template_headers: Vec<TemplateHeader> = headers
+        .into_iter()
+        .map(|(name, value)| TemplateHeader::new(name, value))
+        .collect();
 
     let attack_mode = if let Some(attack) = yaml["attack"].as_str() {
         match attack {
@@ -666,7 +669,7 @@ pub fn parse_http(yaml: &Yaml, regex_cache: &mut RegexCache) -> Result<HttpReque
     requests.append(&mut raw);
     requests
         .iter_mut()
-        .for_each(|req| req.headers = flattened_headers.clone());
+        .for_each(|req| req.headers = template_headers.clone());
 
     Ok(HttpRequest {
         matchers_condition,
@@ -693,7 +696,7 @@ fn parse_variables(yaml: &Yaml) -> (Vec<(String, Value)>, Vec<(String, String)>)
             Yaml::String(val) => {
                 if let Some(captures) = get_bracket_pattern().captures(val) {
                     // We expect expressions in variables to be standalone
-                    // If we ever find out that's not the case, we need to do the same as `bake_ctx` in http.rs
+                    // If embedded expressions occur here, use TemplateString-style interpolation.
                     dsl_variables.push((
                         key.to_string(),
                         String::from(captures.get(1).unwrap().as_str()),
@@ -840,43 +843,8 @@ impl TemplateLoader {
             (success as f32 / total as f32) * 100.0
         );
 
-        let mut tokens: HashMap<CacheKey, u16> = HashMap::new();
-        for template in &loaded_templates {
-            for http in &template.http {
-                // TODO: Validate that the cache isn't accidentally leaking
-                // responses between same looking paths, where the paths are
-                // different due to some DSL stuff
-                // e.g. two identical paths with {{randstr}} in different templates
-                // will have different random strings, thus possible inconsistency!
-                // Have two things to think about
-                // 1. paths where dsl variable depends on something, e.g. extractor etc
-                // 2. paths where dsl variables are declared in the template
-                //    but are either static or deterministic, e.g. {{md5("test")}} but not {{rand_int(1, 100)}}
-                // UPDATE: Temporarily resolved by caching all requests with their post-bake urls
-                for request in &http.path {
-                    tokens
-                        .entry(CacheKey(
-                            request.method,
-                            request.headers.clone(),
-                            request.path.clone(),
-                        ))
-                        .and_modify(|val| *val += 1)
-                        .or_insert(1);
-                }
-            }
-        }
-        let keys: Vec<CacheKey> = tokens.keys().cloned().collect();
-        let mut num_cached = 0;
-        for key in keys {
-            let num_tokens = *tokens.get(&key).unwrap();
-            if num_tokens == 1 {
-                tokens.remove(&key);
-            }
-            num_cached += num_tokens;
-        }
-        verbose!("Cached requests: {num_cached}");
-
-        let cache = Cache::new(tokens);
+        // Request equivalence can only be determined from fully baked values at execution time.
+        let cache = Cache::new(Default::default());
         Self {
             cache,
             regex_cache,
@@ -980,13 +948,22 @@ mod tests {
 
         if let MatcherType::Binary(binary_values) = &matcher.r#type {
             assert_eq!(binary_values.len(), 4, "Expected 4 binary values");
-            assert_eq!(binary_values[0], "PK\u{3}\u{4}", "ZIP signature mismatch");
-            assert_eq!(binary_values[1], "ustar  \0", "TAR signature mismatch");
-            assert_eq!(binary_values[2], "7z��'\u{1c}", "7z signature mismatch");
-            assert_eq!(
-                binary_values[3], "SQLite format 3\0",
-                "SQLite signature mismatch"
-            );
+            let ctx = crate::template::Context {
+                variables: Default::default(),
+                parent: None,
+                scope: crate::template::ContextScope::Global,
+            };
+            let photon_ctx = crate::PhotonContext {
+                functions: crate::init_functions(),
+            };
+            let values = binary_values
+                .iter()
+                .map(|value| value.bake(&ctx, &photon_ctx).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(values[0], "PK\u{3}\u{4}", "ZIP signature mismatch");
+            assert_eq!(values[1], "ustar  \0", "TAR signature mismatch");
+            assert_eq!(values[2], "7z��'\u{1c}", "7z signature mismatch");
+            assert_eq!(values[3], "SQLite format 3\0", "SQLite signature mismatch");
         } else {
             panic!("Expected Binary matcher type");
         }

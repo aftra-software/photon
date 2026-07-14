@@ -141,6 +141,10 @@ mod tests {
     };
 
     fn contexts() -> (Context, PhotonContext) {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
         (
             Context {
                 variables: FxHashMap::default(),

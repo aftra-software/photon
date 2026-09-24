@@ -46,7 +46,11 @@ pub struct PhotonContext {
 }
 
 impl PhotonContext {
+    /// Register a function and its underscore-free alias. Existing entries are replaced.
     pub fn add_function(&mut self, name: &str, func: DslFunction) {
+        if name.contains('_') {
+            self.functions.insert(name.replace('_', ""), func.clone());
+        }
         self.functions.insert(String::from(name), func);
     }
 }
@@ -100,10 +104,12 @@ pub fn health_check(url: &str, timeout: Duration) -> Result<(), curl::Error> {
 }
 
 fn init_functions() -> FxHashMap<String, DslFunction> {
-    let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+    let mut context = PhotonContext {
+        functions: FxHashMap::default(),
+    };
 
-    functions.insert(
-        "concat".into(),
+    context.add_function(
+        "concat",
         DslFunction::variadic(
             0,
             Box::new(|args| {
@@ -116,8 +122,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         ),
     );
     for (name, all) in [("contains_all", true), ("contains_any", false)] {
-        functions.insert(
-            name.into(),
+        context.add_function(
+            name,
             DslFunction::variadic(
                 1,
                 Box::new(move |args| {
@@ -136,8 +142,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         );
     }
 
-    functions.insert(
-        "md5".into(),
+    context.add_function(
+        "md5",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -147,8 +153,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "regex".into(),
+    context.add_function(
+        "regex",
         DslFunction::new(
             2,
             Box::new(|stack| {
@@ -159,8 +165,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "contains".into(),
+    context.add_function(
+        "contains",
         DslFunction::new(
             2,
             Box::new(|stack| {
@@ -170,25 +176,23 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    for name in ["starts_with", "startswith"] {
-        functions.insert(
-            name.into(),
-            DslFunction::variadic(
-                2,
-                Box::new(|args| {
-                    let (value, prefixes) = args.as_slice().split_first().ok_or(())?;
-                    let value = value.to_string();
-                    Ok(Value::Boolean(
-                        prefixes
-                            .iter()
-                            .any(|prefix| value.starts_with(&prefix.to_string())),
-                    ))
-                }),
-            ),
-        );
-    }
-    functions.insert(
-        "tolower".into(),
+    context.add_function(
+        "starts_with",
+        DslFunction::variadic(
+            2,
+            Box::new(|args| {
+                let (value, prefixes) = args.as_slice().split_first().ok_or(())?;
+                let value = value.to_string();
+                Ok(Value::Boolean(
+                    prefixes
+                        .iter()
+                        .any(|prefix| value.starts_with(&prefix.to_string())),
+                ))
+            }),
+        ),
+    );
+    context.add_function(
+        "to_lower",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -197,27 +201,15 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "to_lower".into(),
+    context.add_function(
+        "to_upper",
         DslFunction::new(
             1,
-            Box::new(|stack| {
-                let inp = stack.pop_string()?;
-                Ok(Value::String(inp.to_lowercase()))
-            }),
+            Box::new(|args| Ok(Value::String(args.pop_string()?.to_uppercase()))),
         ),
     );
-    for name in ["to_upper", "toupper"] {
-        functions.insert(
-            name.into(),
-            DslFunction::new(
-                1,
-                Box::new(|args| Ok(Value::String(args.pop_string()?.to_uppercase()))),
-            ),
-        );
-    }
-    functions.insert(
-        "len".into(),
+    context.add_function(
+        "len",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -226,8 +218,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "hex_decode".into(),
+    context.add_function(
+        "hex_decode",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -238,8 +230,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "base64_decode".into(),
+    context.add_function(
+        "base64_decode",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -254,8 +246,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "base64".into(),
+    context.add_function(
+        "base64",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -264,8 +256,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "base64_py".into(),
+    context.add_function(
+        "base64_py",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -290,8 +282,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "mmh3".into(), // MurMurHash3
+    context.add_function(
+        "mmh3", // MurMurHash3
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -301,8 +293,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "rand_int".into(),
+    context.add_function(
+        "rand_int",
         DslFunction::new(
             2,
             Box::new(|stack| {
@@ -317,8 +309,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "to_number".into(),
+    context.add_function(
+        "to_number",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -334,8 +326,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "rand_base".into(),
+    context.add_function(
+        "rand_base",
         DslFunction::with_arity(
             Arity::Range {
                 min: 1,
@@ -364,8 +356,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "rand_text_numeric".into(),
+    context.add_function(
+        "rand_text_numeric",
         DslFunction::with_arity(
             Arity::Range {
                 min: 1,
@@ -394,8 +386,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "rand_text_alphanumeric".into(),
+    context.add_function(
+        "rand_text_alphanumeric",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -411,8 +403,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "rand_text_alpha".into(),
+    context.add_function(
+        "rand_text_alpha",
         DslFunction::new(
             1,
             Box::new(|stack| {
@@ -429,7 +421,7 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         ),
     );
 
-    functions
+    context.functions
 }
 
 #[cfg(test)]
@@ -456,6 +448,83 @@ mod tests {
         let res = compiled.unwrap().execute(&NoVariables, fns);
         assert!(res.is_ok());
         res.unwrap() == Value::Boolean(true)
+    }
+
+    #[test]
+    fn automatic_function_aliases() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for name in functions.keys().filter(|name| name.contains('_')) {
+            assert!(functions.contains_key(&name.replace('_', "")), "{name}");
+        }
+        for source in [
+            "toupper('Hello') == to_upper('Hello')",
+            "tolower('Hello') == to_lower('Hello')",
+            "startswith('Hello', 'Hi', 'Hello')",
+            "containsall('abc', 'a', 'b') && containsany('abc', 'z', 'c')",
+            "hexdecode('4142') == 'AB'",
+            "base64decode(base64('test')) == 'test'",
+            "randbase(3, 'x') == 'xxx'",
+            "randtextnumeric(3, '123456789') == '000'",
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            assert_eq!(
+                compiled.execute(&NoVariables, &functions),
+                Ok(Value::Boolean(true)),
+                "{source}"
+            );
+        }
+        for source in ["toupper()", "startswith('Hello')", "randbase(1, 2, 3, 4)"] {
+            assert!(
+                photon_dsl::parser::compile_expression_validated(source, &functions).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_aliases_share_state_and_are_replaced_together() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let mut context = PhotonContext {
+            functions: init_functions(),
+        };
+        let counter = std::cell::Cell::new(0);
+        context.add_function(
+            "call_count",
+            DslFunction::new(
+                0,
+                Box::new(move |_| {
+                    counter.set(counter.get() + 1);
+                    Ok(Value::Int(counter.get()))
+                }),
+            ),
+        );
+        assert!(test_expression(
+            &context.functions,
+            "call_count() == 1 && callcount() == 2"
+        ));
+
+        context.add_function(
+            "call_count",
+            DslFunction::new(1, Box::new(|args| args.pop())),
+        );
+        assert!(test_expression(
+            &context.functions,
+            "call_count(7) == 7 && callcount(8) == 8"
+        ));
+        for source in ["call_count()", "callcount()"] {
+            assert!(
+                photon_dsl::parser::compile_expression_validated(source, &context.functions)
+                    .is_err()
+            );
+        }
     }
 
     #[test]

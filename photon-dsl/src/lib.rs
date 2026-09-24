@@ -21,7 +21,10 @@ pub mod parser;
 mod util;
 
 use dsl::{CallArgs, Value};
-use std::sync::{Mutex, OnceLock};
+use std::{
+    rc::Rc,
+    sync::{Mutex, OnceLock},
+};
 
 #[derive(Clone)]
 pub struct Config {
@@ -52,8 +55,10 @@ impl Arity {
     }
 }
 
+/// Clones share the callback, including any captured state.
+#[derive(Clone)]
 pub struct DslFunction {
-    pub(crate) func: DslFunc,
+    pub(crate) func: Rc<DslCallback<'static>>,
     pub(crate) arity: Arity,
 }
 
@@ -70,7 +75,10 @@ impl DslFunction {
 
     /// A function with explicit argument bounds, including optional arguments.
     pub fn with_arity(arity: Arity, func: DslFunc) -> Self {
-        Self { func, arity }
+        Self {
+            func: func.into(),
+            arity,
+        }
     }
 }
 

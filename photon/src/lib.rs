@@ -33,7 +33,8 @@ use photon_dsl::{
     DslFunction,
     dsl::{DSLStack, Value},
 };
-use rand::{Rng, distributions::Alphanumeric};
+use rand::RngExt;
+use rand::distr::{Alphabetic, Alphanumeric};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -252,7 +253,8 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
                 let min = stack.pop_int()?;
 
                 // [min, max) like nuclei does, exclusive range
-                let rand_value = rand::thread_rng().gen_range(min..max);
+                let mut rng = rand::rng();
+                let rand_value = rng.random_range(min..max);
 
                 Ok(Value::Int(rand_value))
             }),
@@ -282,8 +284,26 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             Box::new(|stack: &mut DSLStack| {
                 let count = stack.pop_int()?;
 
-                let rand_value = rand::thread_rng()
+                let rng = rand::rng();
+                let rand_value = rng
                     .sample_iter(&Alphanumeric)
+                    .take(count as usize)
+                    .map(char::from);
+
+                Ok(Value::String(rand_value.collect()))
+            }),
+        ),
+    );
+    functions.insert(
+        "rand_text_alpha".into(),
+        DslFunction::new(
+            1,
+            Box::new(|stack: &mut DSLStack| {
+                let count = stack.pop_int()?;
+
+                let rng = rand::rng();
+                let rand_value = rng
+                    .sample_iter(&Alphabetic)
                     .take(count as usize)
                     .map(char::from);
 

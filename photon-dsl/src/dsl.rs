@@ -131,22 +131,22 @@ pub(crate) fn optimize_expr(expr: Expr) -> Expr {
             let optimized_right = optimize_expr(*right);
 
             if op == Operator::And {
-                if let Expr::Constant(Value::Boolean(l_b)) = optimized_left {
-                    if l_b {
-                        return optimized_right;
-                    }
+                if let Expr::Constant(Value::Boolean(l_b)) = optimized_left
+                    && l_b
+                {
+                    return optimized_right;
                 }
-                if let Expr::Constant(Value::Boolean(r_b)) = optimized_right {
-                    if r_b {
-                        return optimized_left;
-                    }
+                if let Expr::Constant(Value::Boolean(r_b)) = optimized_right
+                    && r_b
+                {
+                    return optimized_left;
                 }
             }
             if op == Operator::Or {
-                if let Expr::Constant(Value::Boolean(l_b)) = optimized_left {
-                    if l_b {
-                        return Expr::Constant(Value::Boolean(true));
-                    }
+                if let Expr::Constant(Value::Boolean(l_b)) = optimized_left
+                    && l_b
+                {
+                    return Expr::Constant(Value::Boolean(true));
                 }
                 // Only fold left side, since (func() || true) needs to evaluate func
             }
@@ -201,16 +201,12 @@ pub(crate) fn optimize_expr(expr: Expr) -> Expr {
         }
         Expr::Prefix(op, expr) => {
             let optimized = optimize_expr(*expr);
-            match optimized {
-                Expr::Constant(Value::Boolean(b)) => {
-                    if op == Operator::Invert {
-                        return Expr::Constant(Value::Boolean(!b));
-                    }
+            match (&op, &optimized) {
+                (Operator::Invert, Expr::Constant(Value::Boolean(b))) => {
+                    return Expr::Constant(Value::Boolean(!b));
                 }
-                Expr::Constant(Value::Int(i)) => {
-                    if op == Operator::Invert {
-                        return Expr::Constant(Value::Int(-i));
-                    }
+                (Operator::Invert, Expr::Constant(Value::Int(i))) => {
+                    return Expr::Constant(Value::Int(-i));
                 }
                 _ => {}
             }

@@ -4,14 +4,15 @@ use crate::{
     PhotonContext,
     cache::RegexCache,
     get_config,
-    http::{HttpResponse, bake_ctx, get_bracket_pattern},
+    http::HttpResponse,
     template::{Condition, Context},
+    template_string::TemplateString,
 };
 
 #[derive(Debug, Clone)]
 pub enum MatcherType {
-    Word(Vec<String>),
-    Binary(Vec<String>),
+    Word(Vec<TemplateString>),
+    Binary(Vec<TemplateString>),
     Dsl(Vec<CompiledExpression>),
     Regex(Vec<u32>), // indicies into RegexCache
     Status(Vec<u32>),
@@ -137,19 +138,13 @@ fn response_to_string(data: &HttpResponse, part: ResponsePart) -> String {
 
 fn contains_with_dsl(
     haystack: &str,
-    needle: &str,
+    needle: &TemplateString,
     ctx: &Context,
     photon_ctx: &PhotonContext,
 ) -> bool {
-    if needle.contains("{{") && get_bracket_pattern().is_match(needle) {
-        if let Some(baked) = bake_ctx(needle, ctx, photon_ctx) {
-            haystack.contains(&baked)
-        } else {
-            false
-        }
-    } else {
-        haystack.contains(needle)
-    }
+    needle
+        .bake(ctx, photon_ctx)
+        .is_ok_and(|baked| haystack.contains(&baked))
 }
 
 impl Matcher {

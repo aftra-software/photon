@@ -20,6 +20,7 @@ mod matcher;
 pub mod template;
 pub mod template_executor;
 pub mod template_loader;
+pub mod template_string;
 
 use std::{io::Cursor, sync::Mutex, time::Duration};
 

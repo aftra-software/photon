@@ -30,7 +30,8 @@ comparator = _{ eq | gteq | gt | lteq | lt | neq | regexeq | regexneq | in }
 logicalop  = _{ or | and }
 prefix     = _{ (not | bitnot | neg) ~ (digit | boolean | function | variable | clause) }
 ternary    =  { expr ~ "?" ~ expr ~ ":" ~ expr }
-function   =  { ident ~ (list | clause) }
+arguments  =  { "(" ~ (primary ~ ("," ~ primary)*)? ~ ")" }
+function   =  { ident ~ arguments }
 
 add    = { "+" }
 sub    = { "-" }

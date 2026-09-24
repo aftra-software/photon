@@ -3,7 +3,7 @@ use std::fmt::Display;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use crate::{DslFunction, get_config, util::get_bracket_pattern};
+use crate::{Arity, DslCallback, DslFunction, get_config, util::get_bracket_pattern};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OPCode {
@@ -14,7 +14,7 @@ pub enum OPCode {
     LoadConstInt = 4,   // 64 bit
     LoadConstBoolTrue = 5,
     LoadConstBoolFalse = 6,
-    CallFunc = 7,
+    CallFunc = 7, // name (String), argument count (Int)
 
     // Comparison Operators
     CmpGt = 8,
@@ -254,13 +254,14 @@ fn map_op(op: Operator) -> OPCode {
 pub fn validate_expr_funcs(expr: &Expr, functions: &FxHashMap<String, DslFunction>) -> bool {
     match expr {
         Expr::Function(name, variables) => {
-            let func_args = if let Some(func) = functions.get(name) {
-                func.params
-            } else {
+            let Some(func) = functions.get(name) else {
+                debug!("Function not found: {:?}", name);
                 return false;
             };
-
-            variables.len() == func_args
+            func.arity.accepts(variables.len())
+                && variables
+                    .iter()
+                    .all(|arg| validate_expr_funcs(arg, functions))
         }
         Expr::Operator(left, _, right) => {
             validate_expr_funcs(left, functions) && validate_expr_funcs(right, functions)
@@ -346,12 +347,14 @@ pub fn compile_bytecode(expr: Expr) -> CompiledExpression {
         }
         Expr::Function(name, variables) => {
             let mut ops = Vec::new();
+            let argc = variables.len();
 
             for e in variables {
                 ops.append(&mut compile_bytecode(e).0);
             }
             ops.push(Bytecode::Instr(OPCode::CallFunc));
             ops.push(Bytecode::Value(Value::String(name)));
+            ops.push(Bytecode::Value(Value::Int(argc as i64)));
 
             CompiledExpression(ops)
         }
@@ -449,6 +452,68 @@ pub fn bytecode_to_binary(bytecode: &CompiledExpression) -> Vec<u8> {
     }
 
     bytes
+}
+
+/// A bounded, allocation-free view of a function's arguments.
+///
+/// Arguments are evaluated left to right. `as_slice` preserves that order,
+/// while `pop` takes the last remaining argument, like the evaluation stack.
+/// Dropping the view removes any unconsumed arguments, including on errors.
+pub struct CallArgs<'a> {
+    inner: std::vec::Drain<'a, Value>,
+}
+
+impl<'a> CallArgs<'a> {
+    fn new(stack: &'a mut DSLStack, count: usize) -> Result<Self, ()> {
+        let start = stack.len().checked_sub(count).ok_or(())?;
+        Ok(Self {
+            inner: stack.inner.drain(start..),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn as_slice(&self) -> &[Value] {
+        self.inner.as_slice()
+    }
+
+    pub fn pop(&mut self) -> Result<Value, ()> {
+        self.inner.next_back().ok_or(())
+    }
+
+    pub fn pop_string(&mut self) -> Result<String, ()> {
+        match self.pop()? {
+            Value::String(value) => Ok(value),
+            _ => Err(()),
+        }
+    }
+
+    pub fn pop_int(&mut self) -> Result<i64, ()> {
+        match self.pop()? {
+            Value::Int(value) => Ok(value),
+            _ => Err(()),
+        }
+    }
+
+    pub fn pop_short(&mut self) -> Result<i16, ()> {
+        match self.pop()? {
+            Value::Short(value) => Ok(value),
+            _ => Err(()),
+        }
+    }
+
+    pub fn pop_bool(&mut self) -> Result<bool, ()> {
+        match self.pop()? {
+            Value::Boolean(value) => Ok(value),
+            _ => Err(()),
+        }
+    }
 }
 
 pub struct DSLStack {
@@ -682,18 +747,12 @@ pub trait VariableContainer {
 }
 
 pub trait FunctionProvider {
-    fn get_function(
-        &self,
-        key: &str,
-    ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)>;
+    fn get_function(&self, key: &str) -> Option<(&DslCallback<'_>, Arity)>;
 }
 
 impl FunctionProvider for FxHashMap<String, DslFunction> {
-    fn get_function(
-        &self,
-        key: &str,
-    ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)> {
-        self.get(key).map(|f| (f.func.as_ref(), f.params))
+    fn get_function(&self, key: &str) -> Option<(&DslCallback<'_>, Arity)> {
+        self.get(key).map(|f| (f.func.as_ref(), f.arity))
     }
 }
 
@@ -713,38 +772,26 @@ where
     while ptr < bytecode.len() {
         match &bytecode[ptr] {
             Bytecode::Instr(OPCode::CallFunc) => {
-                ptr += 1;
-                if let Bytecode::Value(Value::String(key)) = &bytecode[ptr] {
-                    match functions.get_function(key) {
-                        Some((func, params)) => {
-                            // TODO: Using a DslStackView-type approach might be better when we add richer errors.
-                            // see https://github.com/aftra-software/photon/pull/15#discussion_r2071749326
-                            let stack_len = stack.len();
-
-                            let ret = func(&mut stack)?;
-
-                            // Verify that the function popped exactly params values off the stack
-                            if stack.len() != stack_len - params {
-                                debug!(
-                                    "Function {} popped {} values off the stack, expected {} popped.",
-                                    key,
-                                    stack_len - stack.len(),
-                                    params
-                                );
-                                return Err(());
-                            }
-
-                            stack.push(ret);
-                        }
-                        None => {
-                            debug!("Function not found: {:?}", key);
-                            return Err(());
-                        }
-                    }
-                } else {
-                    debug!("LoadVar called with invalid argument: {:?}", &bytecode[ptr]);
+                let Some(Bytecode::Value(Value::String(key))) = bytecode.get(ptr + 1) else {
+                    return Err(());
+                };
+                let Some(Bytecode::Value(Value::Int(argc))) = bytecode.get(ptr + 2) else {
+                    return Err(());
+                };
+                let argc = usize::try_from(*argc).map_err(|_| ())?;
+                let (func, arity) = functions.get_function(key).ok_or_else(|| {
+                    debug!("Function not found: {:?}", key);
+                })?;
+                if !arity.accepts(argc) {
+                    debug!(
+                        "Function {} expected {:?} arguments, got {}",
+                        key, arity, argc
+                    );
                     return Err(());
                 }
+                let ret = func(&mut CallArgs::new(&mut stack, argc)?)?;
+                stack.push(ret);
+                ptr += 2;
             }
             // TODO: Should variables be case-insensitive?
             Bytecode::Instr(OPCode::LoadVar) => {

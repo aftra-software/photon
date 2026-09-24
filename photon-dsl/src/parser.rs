@@ -27,12 +27,12 @@ pub fn compile_expression_validated(
     if !validate_expr_funcs(&expr, functions) {
         Err(())
     } else {
-        Ok(compile_bytecode(expr))
+        Ok(compile_bytecode(optimize_expr(expr)))
     }
 }
 
 pub fn compile_expression(data: &str) -> Result<CompiledExpression, ()> {
-    Ok(compile_bytecode(do_parsing(data)?))
+    Ok(compile_bytecode(optimize_expr(do_parsing(data)?)))
 }
 
 pub fn do_parsing(data: &str) -> Result<Expr, ()> {
@@ -41,7 +41,30 @@ pub fn do_parsing(data: &str) -> Result<Expr, ()> {
         debug!("parser error: {:?}", err);
     }
     let expr = parse_expr(res.map_err(|_| ())?);
-    Ok(optimize_expr(expr))
+    if is_scalar_expr(&expr) {
+        Ok(expr)
+    } else {
+        Err(())
+    }
+}
+
+// Lists currently occupy multiple stack slots and are only supported by `in`.
+// Every function argument (and ordinary operand) must produce a single value.
+fn is_scalar_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::List(_) => false,
+        Expr::Operator(left, Operator::In, right) => {
+            is_scalar_expr(left)
+                && matches!(right.as_ref(), Expr::List(items) if items.iter().all(is_scalar_expr))
+        }
+        Expr::Operator(left, _, right) => is_scalar_expr(left) && is_scalar_expr(right),
+        Expr::Function(_, args) => args.iter().all(is_scalar_expr),
+        Expr::Ternary(condition, left, right) => {
+            is_scalar_expr(condition) && is_scalar_expr(left) && is_scalar_expr(right)
+        }
+        Expr::Prefix(_, expr) => is_scalar_expr(expr),
+        Expr::Constant(_) | Expr::Variable(_) => true,
+    }
 }
 
 lazy_static::lazy_static! {

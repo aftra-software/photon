@@ -31,7 +31,6 @@ use md5::{Digest, Md5};
 use murmur3::murmur3_32;
 use photon_dsl::{Arity, DslFunction, dsl::Value};
 use rand::RngExt;
-use rand::distr::{Alphabetic, Alphanumeric};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -389,70 +388,49 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    context.add_function(
-        "rand_text_numeric",
-        DslFunction::with_arity(
-            Arity::Range {
-                min: 1,
-                max: Some(2),
-            },
-            Box::new(|args| {
-                let args = args.as_slice();
-                let length = args[0]
-                    .to_string()
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|_| ())?;
-                let mut digits = b"0123456789".to_vec();
-                if args.len() == 2 {
-                    let excluded = args[1].to_string();
-                    digits.retain(|digit| !excluded.as_bytes().contains(digit));
-                }
-                if digits.is_empty() && length > 0 {
-                    return Err(());
-                }
-                let mut rng = rand::rng();
-                let result = (0..length)
-                    .map(|_| char::from(digits[rng.random_range(0..digits.len())]))
-                    .collect();
-                Ok(Value::String(result))
-            }),
+    // Shared implementation, only the default character set differs.
+    for (name, charset) in [
+        (
+            "rand_text_alpha",
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
         ),
-    );
-    context.add_function(
-        "rand_text_alphanumeric",
-        DslFunction::new(
-            1,
-            Box::new(|stack| {
-                let count = stack.pop_int()?;
-
-                let rng = rand::rng();
-                let rand_value = rng
-                    .sample_iter(&Alphanumeric)
-                    .take(count as usize)
-                    .map(char::from);
-
-                Ok(Value::String(rand_value.collect()))
-            }),
+        (
+            "rand_text_alphanumeric",
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
         ),
-    );
-    context.add_function(
-        "rand_text_alpha",
-        DslFunction::new(
-            1,
-            Box::new(|stack| {
-                let count = stack.pop_int()?;
-
-                let rng = rand::rng();
-                let rand_value = rng
-                    .sample_iter(&Alphabetic)
-                    .take(count as usize)
-                    .map(char::from);
-
-                Ok(Value::String(rand_value.collect()))
-            }),
-        ),
-    );
+        ("rand_text_numeric", "0123456789"),
+    ] {
+        context.add_function(
+            name,
+            DslFunction::with_arity(
+                Arity::Range {
+                    min: 1,
+                    max: Some(2),
+                },
+                Box::new(move |args| {
+                    let args = args.as_slice();
+                    let length = args[0]
+                        .to_string()
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| ())?;
+                    let mut chars = charset.as_bytes().to_vec();
+                    if args.len() == 2 {
+                        let excluded = args[1].to_string();
+                        chars.retain(|c| !excluded.as_bytes().contains(c));
+                    }
+                    if chars.is_empty() && length > 0 {
+                        return Err(());
+                    }
+                    let mut rng = rand::rng();
+                    let result = (0..length)
+                        .map(|_| char::from(chars[rng.random_range(0..chars.len())]))
+                        .collect();
+                    Ok(Value::String(result))
+                }),
+            ),
+        );
+    }
 
     context.functions
 }
@@ -653,6 +631,80 @@ mod tests {
                 compiled.execute(&NoVariables, &functions).is_err(),
                 "{source}"
             );
+        }
+    }
+
+    #[test]
+    fn rand_text_optional_badchars() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for (name, alphabet) in [
+            (
+                "rand_text_alpha",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            ),
+            (
+                "rand_text_alphanumeric",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            ),
+            ("rand_text_numeric", "0123456789"),
+        ] {
+            for name in [name.to_owned(), name.replace('_', "")] {
+                // Exclude everything but the first character; repeats and non-ASCII
+                // exclusions must not change which characters remain available.
+                let excluded = &alphabet[1..];
+                for (arguments, length, allowed) in [
+                    ("32".to_owned(), 32, alphabet),
+                    ("' 12 ', ''".to_owned(), 12, alphabet),
+                    (format!("8, '{excluded}{excluded}é'"), 8, &alphabet[..1]),
+                    (format!("0, '{alphabet}'"), 0, ""),
+                ] {
+                    let source = format!("{name}({arguments})");
+                    let compiled =
+                        photon_dsl::parser::compile_expression_validated(&source, &functions)
+                            .unwrap();
+                    let Value::String(result) = compiled.execute(&NoVariables, &functions).unwrap()
+                    else {
+                        panic!("{source} should return a string");
+                    };
+                    assert_eq!(result.len(), length, "{source}");
+                    assert!(
+                        result.chars().all(|c| allowed.contains(c)),
+                        "{source}: {result}"
+                    );
+                }
+                for arguments in ["", "1, 'a', 'b'"] {
+                    let source = format!("{name}({arguments})");
+                    assert!(
+                        photon_dsl::parser::compile_expression_validated(&source, &functions)
+                            .is_err()
+                    );
+                    assert!(
+                        compile_expression(&source)
+                            .unwrap()
+                            .execute(&NoVariables, &functions)
+                            .is_err()
+                    );
+                }
+                for arguments in [
+                    "-1".to_owned(),
+                    "'invalid'".to_owned(),
+                    "true".to_owned(),
+                    format!("1, '{alphabet}'"),
+                ] {
+                    let source = format!("{name}({arguments})");
+                    let compiled =
+                        photon_dsl::parser::compile_expression_validated(&source, &functions)
+                            .unwrap();
+                    assert!(
+                        compiled.execute(&NoVariables, &functions).is_err(),
+                        "{source}"
+                    );
+                }
+            }
         }
     }
 

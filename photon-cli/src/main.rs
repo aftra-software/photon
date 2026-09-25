@@ -29,6 +29,9 @@ struct Args {
 
     #[arg(short = 'H', long)]
     header: Option<Vec<String>>,
+
+    #[arg(short, long, default_value_t = 512, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    max_cache_memory_mb: usize,
 }
 
 fn main() {
@@ -69,6 +72,8 @@ fn main() {
     if let Some(user_agent) = args.user_agent {
         options.set_user_agent(&user_agent);
     }
+
+    executor.set_cache_memory_limit(1024 * 1024 * args.max_cache_memory_mb);
 
     executor.set_options(options);
     executor.set_callbacks(

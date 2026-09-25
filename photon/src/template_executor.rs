@@ -120,6 +120,10 @@ where
         self.execution_context.options = options;
     }
 
+    pub fn set_cache_memory_limit(&mut self, limit: usize) {
+        self.execution_context.cache.set_capacity(limit);
+    }
+
     pub fn get_total_reqs(&self) -> u32 {
         self.execution_context.total_reqs
     }

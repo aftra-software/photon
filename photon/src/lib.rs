@@ -219,6 +219,39 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
         ),
     );
     context.add_function(
+        "url_encode",
+        DslFunction::with_arity(
+            Arity::Range {
+                min: 1,
+                max: Some(2),
+            },
+            Box::new(|args| {
+                let args = args.as_slice();
+                let encode_all = matches!(
+                    args.get(1),
+                    Some(Value::Boolean(true) | Value::Int(1) | Value::Short(1))
+                );
+                let input = args[0].to_string();
+                let mut result = String::with_capacity(input.len());
+                for byte in input.bytes() {
+                    // Nuclei preserves these special characters unless explicitly requested.
+                    let unescaped = byte.is_ascii_alphanumeric()
+                        || (!encode_all
+                            && matches!(
+                                byte,
+                                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+                            ));
+                    if unescaped {
+                        result.push(char::from(byte));
+                    } else {
+                        write!(&mut result, "%{byte:02X}").map_err(|_| ())?;
+                    }
+                }
+                Ok(Value::String(result))
+            }),
+        ),
+    );
+    context.add_function(
         "hex_decode",
         DslFunction::new(
             1,
@@ -663,6 +696,55 @@ mod tests {
             assert!(
                 compiled.execute(&NoVariables, &functions).is_err(),
                 "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn url_encoding_matches_nuclei() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for (source, expected) in [
+            ("url_encode('')", ""),
+            (
+                "url_encode('Hello world+/%?&=:#')",
+                "Hello%20world%2B%2F%25%3F%26%3D%3A%23",
+            ),
+            (r#"url_encode("-_.!~*'()")"#, "-_.!~*'()"),
+            (
+                r#"url_encode("AZaz09-_.!~*'()", true)"#,
+                "AZaz09%2D%5F%2E%21%7E%2A%27%28%29",
+            ),
+            ("url_encode('a_b', false)", "a_b"),
+            ("url_encode('a_b', 1)", "a%5Fb"),
+            ("url_encode('a_b', 0)", "a_b"),
+            ("url_encode('a_b', 'true')", "a_b"),
+            ("url_encode('é😀')", "%C3%A9%F0%9F%98%80"),
+            ("url_encode(123)", "123"),
+            ("urlencode('a b')", "a%20b"),
+            (
+                "concat('prefix', url_encode('a b'), 'suffix')",
+                "prefixa%20bsuffix",
+            ),
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            assert_eq!(
+                compiled.execute(&NoVariables, &functions),
+                Ok(Value::String(expected.into())),
+                "{source}"
+            );
+        }
+        for source in ["url_encode()", "url_encode('a', true, false)"] {
+            assert!(photon_dsl::parser::compile_expression_validated(source, &functions).is_err());
+            assert!(
+                compile_expression(source)
+                    .unwrap()
+                    .execute(&NoVariables, &functions)
+                    .is_err()
             );
         }
     }

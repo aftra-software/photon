@@ -1,5 +1,5 @@
 use curl::easy::Easy2;
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use url::Url;
 
 use crate::{
@@ -180,17 +180,14 @@ where
             // Some random strings, they're static per template, see https://github.com/projectdiscovery/nuclei/blob/358249bdb4e2f87a7203166ae32b34de0f57b715/pkg/templates/compile.go#L293
             {
                 let mut borrowed = self.execution_context.ctx.borrow_mut();
-                borrowed.insert_str(
-                    "randstr",
-                    &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
-                );
+                borrowed.insert_str("randstr", &Alphanumeric.sample_string(&mut rand::rng(), 27));
 
                 // TODO: Do we want to support arbitrary many random strings?
                 // randstr_6 is the highest being used by any template
                 for i in 0..6 {
                     borrowed.insert_str(
                         &format!("randstr_{}", i + 1),
-                        &Alphanumeric.sample_string(&mut rand::thread_rng(), 27),
+                        &Alphanumeric.sample_string(&mut rand::rng(), 27),
                     );
                 }
             }

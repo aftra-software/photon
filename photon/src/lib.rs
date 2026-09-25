@@ -22,18 +22,15 @@ pub mod template_executor;
 pub mod template_loader;
 pub mod template_string;
 
-use std::{io::Cursor, sync::Mutex, time::Duration};
+use std::{fmt::Write, io::Cursor, sync::Mutex, time::Duration};
 
 use base64::{Engine, prelude::BASE64_STANDARD};
 use curl::easy::Easy;
 use itertools::Itertools;
 use md5::{Digest, Md5};
 use murmur3::murmur3_32;
-use photon_dsl::{
-    DslFunction,
-    dsl::{DSLStack, Value},
-};
-use rand::{Rng, distributions::Alphanumeric};
+use photon_dsl::{Arity, DslFunction, dsl::Value};
+use rand::RngExt;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -48,7 +45,11 @@ pub struct PhotonContext {
 }
 
 impl PhotonContext {
+    /// Register a function and its underscore-free alias. Existing entries are replaced.
     pub fn add_function(&mut self, name: &str, func: DslFunction) {
+        if name.contains('_') {
+            self.functions.insert(name.replace('_', ""), func.clone());
+        }
         self.functions.insert(String::from(name), func);
     }
 }
@@ -102,24 +103,60 @@ pub fn health_check(url: &str, timeout: Duration) -> Result<(), curl::Error> {
 }
 
 fn init_functions() -> FxHashMap<String, DslFunction> {
-    let mut functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+    let mut context = PhotonContext {
+        functions: FxHashMap::default(),
+    };
 
-    functions.insert(
-        "md5".into(),
+    context.add_function(
+        "concat",
+        DslFunction::variadic(
+            0,
+            Box::new(|args| {
+                let mut result = String::new();
+                for value in args.as_slice() {
+                    write!(&mut result, "{value}").map_err(|_| ())?;
+                }
+                Ok(Value::String(result))
+            }),
+        ),
+    );
+    for (name, all) in [("contains_all", true), ("contains_any", false)] {
+        context.add_function(
+            name,
+            DslFunction::variadic(
+                1,
+                Box::new(move |args| {
+                    let (haystack, needles) = args.as_slice().split_first().ok_or(())?;
+                    let haystack = haystack.to_string();
+                    let mut matches = needles
+                        .iter()
+                        .map(|needle| haystack.contains(&needle.to_string()));
+                    Ok(Value::Boolean(if all {
+                        matches.all(|matched| matched)
+                    } else {
+                        matches.any(|matched| matched)
+                    }))
+                }),
+            ),
+        );
+    }
+
+    context.add_function(
+        "md5",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop()?.to_string();
                 let hash = base16ct::lower::encode_string(&Md5::digest(inp));
                 Ok(Value::String(hash))
             }),
         ),
     );
-    functions.insert(
-        "regex".into(),
+    context.add_function(
+        "regex",
         DslFunction::new(
             2,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 let patt = stack.pop_string()?;
                 let reg = Regex::new(&patt).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
@@ -127,52 +164,97 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "contains".into(),
+    context.add_function(
+        "contains",
         DslFunction::new(
             2,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let needle = stack.pop_string()?;
                 let haystack = stack.pop_string()?;
                 Ok(Value::Boolean(haystack.contains(&needle)))
             }),
         ),
     );
-    functions.insert(
-        "tolower".into(),
+    context.add_function(
+        "starts_with",
+        DslFunction::variadic(
+            2,
+            Box::new(|args| {
+                let (value, prefixes) = args.as_slice().split_first().ok_or(())?;
+                let value = value.to_string();
+                Ok(Value::Boolean(
+                    prefixes
+                        .iter()
+                        .any(|prefix| value.starts_with(&prefix.to_string())),
+                ))
+            }),
+        ),
+    );
+    context.add_function(
+        "to_lower",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 Ok(Value::String(inp.to_lowercase()))
             }),
         ),
     );
-    functions.insert(
-        "to_lower".into(),
+    context.add_function(
+        "to_upper",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
-                let inp = stack.pop_string()?;
-                Ok(Value::String(inp.to_lowercase()))
-            }),
+            Box::new(|args| Ok(Value::String(args.pop_string()?.to_uppercase()))),
         ),
     );
-    functions.insert(
-        "len".into(),
+    context.add_function(
+        "len",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 Ok(Value::Int(inp.len() as i64))
             }),
         ),
     );
-    functions.insert(
-        "hex_decode".into(),
+    context.add_function(
+        "url_encode",
+        DslFunction::with_arity(
+            Arity::Range {
+                min: 1,
+                max: Some(2),
+            },
+            Box::new(|args| {
+                let args = args.as_slice();
+                let encode_all = matches!(
+                    args.get(1),
+                    Some(Value::Boolean(true) | Value::Int(1) | Value::Short(1))
+                );
+                let input = args[0].to_string();
+                let mut result = String::with_capacity(input.len());
+                for byte in input.bytes() {
+                    // Nuclei preserves these special characters unless explicitly requested.
+                    let unescaped = byte.is_ascii_alphanumeric()
+                        || (!encode_all
+                            && matches!(
+                                byte,
+                                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+                            ));
+                    if unescaped {
+                        result.push(char::from(byte));
+                    } else {
+                        write!(&mut result, "%{byte:02X}").map_err(|_| ())?;
+                    }
+                }
+                Ok(Value::String(result))
+            }),
+        ),
+    );
+    context.add_function(
+        "hex_decode",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 let decoded_vec = base16ct::mixed::decode_vec(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
                 let decoded_str = String::from_utf8_lossy(&decoded_vec);
@@ -180,11 +262,11 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "base64_decode".into(),
+    context.add_function(
+        "base64_decode",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 let decoded_vec = BASE64_STANDARD.decode(inp).map_err(|_| ())?; // TODO: Don't map err, use some proper DSL error handling
 
@@ -196,21 +278,21 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "base64".into(),
+    context.add_function(
+        "base64",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 Ok(Value::String(BASE64_STANDARD.encode(inp)))
             }),
         ),
     );
-    functions.insert(
-        "base64_py".into(),
+    context.add_function(
+        "base64_py",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 let encoded = BASE64_STANDARD.encode(inp);
                 let mut pythonic = String::with_capacity(encoded.len() + 10); // Slightly larger string, to account for the added spaces in most cases
@@ -232,37 +314,38 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "mmh3".into(), // MurMurHash3
+    context.add_function(
+        "mmh3", // MurMurHash3
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let inp = stack.pop_string()?;
                 let hash_result = murmur3_32(&mut Cursor::new(inp), 0).map_err(|_| ())?;
                 Ok(Value::Int(hash_result as i64))
             }),
         ),
     );
-    functions.insert(
-        "rand_int".into(),
+    context.add_function(
+        "rand_int",
         DslFunction::new(
             2,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let max = stack.pop_int()?;
                 let min = stack.pop_int()?;
 
                 // [min, max) like nuclei does, exclusive range
-                let rand_value = rand::thread_rng().gen_range(min..max);
+                let mut rng = rand::rng();
+                let rand_value = rng.random_range(min..max);
 
                 Ok(Value::Int(rand_value))
             }),
         ),
     );
-    functions.insert(
-        "to_number".into(),
+    context.add_function(
+        "to_number",
         DslFunction::new(
             1,
-            Box::new(|stack: &mut DSLStack| {
+            Box::new(|stack| {
                 let num = stack.pop()?;
 
                 match num {
@@ -275,24 +358,81 @@ fn init_functions() -> FxHashMap<String, DslFunction> {
             }),
         ),
     );
-    functions.insert(
-        "rand_text_alphanumeric".into(),
-        DslFunction::new(
-            1,
-            Box::new(|stack: &mut DSLStack| {
-                let count = stack.pop_int()?;
-
-                let rand_value = rand::thread_rng()
-                    .sample_iter(&Alphanumeric)
-                    .take(count as usize)
-                    .map(char::from);
-
-                Ok(Value::String(rand_value.collect()))
+    context.add_function(
+        "rand_base",
+        DslFunction::with_arity(
+            Arity::Range {
+                min: 1,
+                max: Some(3),
+            },
+            Box::new(|args| {
+                let args = args.as_slice();
+                let length = args[0]
+                    .to_string()
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| ())?;
+                // Nuclei accepts three arguments but only uses the charset with two.
+                let custom = (args.len() == 2).then(|| args[1].to_string());
+                let charset = custom
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890")
+                    .as_bytes();
+                let mut rng = rand::rng();
+                // Nuclei's RandSeq samples UTF-8 bytes and converts each byte to a rune.
+                let result = (0..length)
+                    .map(|_| char::from(charset[rng.random_range(0..charset.len())]))
+                    .collect();
+                Ok(Value::String(result))
             }),
         ),
     );
+    // Shared implementation, only the default character set differs.
+    for (name, charset) in [
+        (
+            "rand_text_alpha",
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        ),
+        (
+            "rand_text_alphanumeric",
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        ),
+        ("rand_text_numeric", "0123456789"),
+    ] {
+        context.add_function(
+            name,
+            DslFunction::with_arity(
+                Arity::Range {
+                    min: 1,
+                    max: Some(2),
+                },
+                Box::new(move |args| {
+                    let args = args.as_slice();
+                    let length = args[0]
+                        .to_string()
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| ())?;
+                    let mut chars = charset.as_bytes().to_vec();
+                    if args.len() == 2 {
+                        let excluded = args[1].to_string();
+                        chars.retain(|c| !excluded.as_bytes().contains(c));
+                    }
+                    if chars.is_empty() && length > 0 {
+                        return Err(());
+                    }
+                    let mut rng = rand::rng();
+                    let result = (0..length)
+                        .map(|_| char::from(chars[rng.random_range(0..chars.len())]))
+                        .collect();
+                    Ok(Value::String(result))
+                }),
+            ),
+        );
+    }
 
-    functions
+    context.functions
 }
 
 #[cfg(test)]
@@ -319,6 +459,346 @@ mod tests {
         let res = compiled.unwrap().execute(&NoVariables, fns);
         assert!(res.is_ok());
         res.unwrap() == Value::Boolean(true)
+    }
+
+    #[test]
+    fn automatic_function_aliases() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for name in functions.keys().filter(|name| name.contains('_')) {
+            assert!(functions.contains_key(&name.replace('_', "")), "{name}");
+        }
+        for source in [
+            "toupper('Hello') == to_upper('Hello')",
+            "tolower('Hello') == to_lower('Hello')",
+            "startswith('Hello', 'Hi', 'Hello')",
+            "containsall('abc', 'a', 'b') && containsany('abc', 'z', 'c')",
+            "hexdecode('4142') == 'AB'",
+            "base64decode(base64('test')) == 'test'",
+            "randbase(3, 'x') == 'xxx'",
+            "randtextnumeric(3, '123456789') == '000'",
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            assert_eq!(
+                compiled.execute(&NoVariables, &functions),
+                Ok(Value::Boolean(true)),
+                "{source}"
+            );
+        }
+        for source in ["toupper()", "startswith('Hello')", "randbase(1, 2, 3, 4)"] {
+            assert!(
+                photon_dsl::parser::compile_expression_validated(source, &functions).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_aliases_share_state_and_are_replaced_together() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let mut context = PhotonContext {
+            functions: init_functions(),
+        };
+        let counter = std::cell::Cell::new(0);
+        context.add_function(
+            "call_count",
+            DslFunction::new(
+                0,
+                Box::new(move |_| {
+                    counter.set(counter.get() + 1);
+                    Ok(Value::Int(counter.get()))
+                }),
+            ),
+        );
+        assert!(test_expression(
+            &context.functions,
+            "call_count() == 1 && callcount() == 2"
+        ));
+
+        context.add_function(
+            "call_count",
+            DslFunction::new(1, Box::new(|args| args.pop())),
+        );
+        assert!(test_expression(
+            &context.functions,
+            "call_count(7) == 7 && callcount(8) == 8"
+        ));
+        for source in ["call_count()", "callcount()"] {
+            assert!(
+                photon_dsl::parser::compile_expression_validated(source, &context.functions)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn variadic_functions() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for source in [
+            "concat() == ''",
+            "concat('a') == 'a'",
+            "concat('a', 2, true, concat('b', 'c')) == 'a2truebc'",
+            "contains('prefixabc', concat('a', 'b', 'c'))",
+            "contains_all('abc', 'a', 'bc')",
+            "!contains_all('abc', 'z', 'a')",
+            "contains_any('abc', 'a', 'z')",
+            "!contains_any('abc', 'x', 'z')",
+            "contains_all('abc')",
+            "!contains_any('abc')",
+            "contains_all(123, 1, 23)",
+            "contains_any(123, false, 2)",
+            "concat('prefix', contains_any('abc', 'a', 'z'), 'suffix') == 'prefixtruesuffix'",
+        ] {
+            assert!(test_expression(&functions, source), "{source}");
+        }
+        for source in ["contains_all()", "contains_any()"] {
+            assert!(photon_dsl::parser::compile_expression_validated(source, &functions).is_err());
+            assert!(
+                compile_expression(source)
+                    .unwrap()
+                    .execute(&NoVariables, &functions)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn rand_base() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        let alphanumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        for (source, length, charset) in [
+            ("rand_base(12)", 12, alphanumeric),
+            ("rand_base(0)", 0, alphanumeric),
+            ("rand_base(' 12 ')", 12, alphanumeric),
+            ("rand_base(32, '')", 32, alphanumeric),
+            ("rand_base(32, ' \t\n')", 32, alphanumeric),
+            ("rand_base(32, 'abc123')", 32, "abc123"),
+            ("rand_base(12, 'x')", 12, "x"),
+            ("rand_base(12, 7)", 12, "7"),
+            ("rand_base(12, true)", 12, "true"),
+            ("rand_base(12, 'é')", 12, "Ã©"),
+            ("rand_base(32, '#', 'ignored')", 32, alphanumeric),
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            let Value::String(result) = compiled.execute(&NoVariables, &functions).unwrap() else {
+                panic!("{source} should return a string");
+            };
+            assert_eq!(result.chars().count(), length, "{source}");
+            assert!(
+                result.chars().all(|c| charset.contains(c)),
+                "{source}: {result}"
+            );
+        }
+        assert!(test_expression(
+            &functions,
+            "concat('prefix', rand_base(3, 'x'), 'suffix') == 'prefixxxxsuffix'"
+        ));
+
+        for source in ["rand_base()", "rand_base(1, 'x', 'y', 'z')"] {
+            assert!(photon_dsl::parser::compile_expression_validated(source, &functions).is_err());
+            assert!(
+                compile_expression(source)
+                    .unwrap()
+                    .execute(&NoVariables, &functions)
+                    .is_err()
+            );
+        }
+        for source in [
+            "rand_base(-1)",
+            "rand_base('invalid')",
+            "rand_base(true)",
+            "rand_base('18446744073709551616')",
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            assert!(
+                compiled.execute(&NoVariables, &functions).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn rand_text_optional_badchars() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for (name, alphabet) in [
+            (
+                "rand_text_alpha",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            ),
+            (
+                "rand_text_alphanumeric",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            ),
+            ("rand_text_numeric", "0123456789"),
+        ] {
+            for name in [name.to_owned(), name.replace('_', "")] {
+                // Exclude everything but the first character; repeats and non-ASCII
+                // exclusions must not change which characters remain available.
+                let excluded = &alphabet[1..];
+                for (arguments, length, allowed) in [
+                    ("32".to_owned(), 32, alphabet),
+                    ("' 12 ', ''".to_owned(), 12, alphabet),
+                    (format!("8, '{excluded}{excluded}é'"), 8, &alphabet[..1]),
+                    (format!("0, '{alphabet}'"), 0, ""),
+                ] {
+                    let source = format!("{name}({arguments})");
+                    let compiled =
+                        photon_dsl::parser::compile_expression_validated(&source, &functions)
+                            .unwrap();
+                    let Value::String(result) = compiled.execute(&NoVariables, &functions).unwrap()
+                    else {
+                        panic!("{source} should return a string");
+                    };
+                    assert_eq!(result.len(), length, "{source}");
+                    assert!(
+                        result.chars().all(|c| allowed.contains(c)),
+                        "{source}: {result}"
+                    );
+                }
+                for arguments in ["", "1, 'a', 'b'"] {
+                    let source = format!("{name}({arguments})");
+                    assert!(
+                        photon_dsl::parser::compile_expression_validated(&source, &functions)
+                            .is_err()
+                    );
+                    assert!(
+                        compile_expression(&source)
+                            .unwrap()
+                            .execute(&NoVariables, &functions)
+                            .is_err()
+                    );
+                }
+                for arguments in [
+                    "-1".to_owned(),
+                    "'invalid'".to_owned(),
+                    "true".to_owned(),
+                    format!("1, '{alphabet}'"),
+                ] {
+                    let source = format!("{name}({arguments})");
+                    let compiled =
+                        photon_dsl::parser::compile_expression_validated(&source, &functions)
+                            .unwrap();
+                    assert!(
+                        compiled.execute(&NoVariables, &functions).is_err(),
+                        "{source}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rand_text_numeric() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for source in [
+            "regex('^[0-9]{32}$', rand_text_numeric(32))",
+            "regex('^[2-9]{32}$', rand_text_numeric(32, '01'))",
+            "regex('^[0-9]{12}$', rand_text_numeric(' 12 ', ''))",
+            "rand_text_numeric(5, '123456789') == '00000'",
+            "rand_text_numeric(5, '012345678') == '99999'",
+            "rand_text_numeric(0) == ''",
+            "rand_text_numeric(0, '0123456789') == ''",
+            "concat('prefix', rand_text_numeric(3, 123456789), 'suffix') == 'prefix000suffix'",
+        ] {
+            assert!(test_expression(&functions, source), "{source}");
+            assert!(photon_dsl::parser::compile_expression_validated(source, &functions).is_ok());
+        }
+        for source in ["rand_text_numeric()", "rand_text_numeric(1, '0', '1')"] {
+            assert!(photon_dsl::parser::compile_expression_validated(source, &functions).is_err());
+            assert!(
+                compile_expression(source)
+                    .unwrap()
+                    .execute(&NoVariables, &functions)
+                    .is_err()
+            );
+        }
+        for source in [
+            "rand_text_numeric(-1)",
+            "rand_text_numeric('invalid')",
+            "rand_text_numeric(true)",
+            "rand_text_numeric(1, '0123456789')",
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            assert!(
+                compiled.execute(&NoVariables, &functions).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn url_encoding_matches_nuclei() {
+        photon_dsl::set_config(photon_dsl::Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions = init_functions();
+        for (source, expected) in [
+            ("url_encode('')", ""),
+            (
+                "url_encode('Hello world+/%?&=:#')",
+                "Hello%20world%2B%2F%25%3F%26%3D%3A%23",
+            ),
+            (r#"url_encode("-_.!~*'()")"#, "-_.!~*'()"),
+            (
+                r#"url_encode("AZaz09-_.!~*'()", true)"#,
+                "AZaz09%2D%5F%2E%21%7E%2A%27%28%29",
+            ),
+            ("url_encode('a_b', false)", "a_b"),
+            ("url_encode('a_b', 1)", "a%5Fb"),
+            ("url_encode('a_b', 0)", "a_b"),
+            ("url_encode('a_b', 'true')", "a_b"),
+            ("url_encode('é😀')", "%C3%A9%F0%9F%98%80"),
+            ("url_encode(123)", "123"),
+            ("urlencode('a b')", "a%20b"),
+            (
+                "concat('prefix', url_encode('a b'), 'suffix')",
+                "prefixa%20bsuffix",
+            ),
+        ] {
+            let compiled =
+                photon_dsl::parser::compile_expression_validated(source, &functions).unwrap();
+            assert_eq!(
+                compiled.execute(&NoVariables, &functions),
+                Ok(Value::String(expected.into())),
+                "{source}"
+            );
+        }
+        for source in ["url_encode()", "url_encode('a', true, false)"] {
+            assert!(photon_dsl::parser::compile_expression_validated(source, &functions).is_err());
+            assert!(
+                compile_expression(source)
+                    .unwrap()
+                    .execute(&NoVariables, &functions)
+                    .is_err()
+            );
+        }
     }
 
     #[test]

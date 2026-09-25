@@ -14,15 +14,15 @@ use crate::{
 };
 use itertools::Itertools;
 use photon_dsl::{
-    DslFunction,
-    dsl::{CompiledExpression, DSLStack, FunctionProvider, Value, VariableContainer},
+    Arity, DslCallback, DslFunction,
+    dsl::{CompiledExpression, FunctionProvider, Value, VariableContainer},
     parser::compile_expression_validated,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 struct FlowDslFunction<'a> {
-    func: Box<dyn Fn(&mut DSLStack) -> Result<Value, ()> + 'a>,
-    params: usize,
+    func: Box<DslCallback<'a>>,
+    arity: Arity,
 }
 
 struct FlowFunctions<'a> {
@@ -31,13 +31,10 @@ struct FlowFunctions<'a> {
 }
 
 impl<'a> FunctionProvider for FlowFunctions<'a> {
-    fn get_function(
-        &self,
-        key: &str,
-    ) -> Option<(&dyn Fn(&mut DSLStack) -> Result<Value, ()>, usize)> {
+    fn get_function(&self, key: &str) -> Option<(&DslCallback<'_>, Arity)> {
         // Flow-handling functions have priority
         if let Some(f) = self.flow_functions.get(key) {
-            Some((f.func.as_ref(), f.params))
+            Some((f.func.as_ref(), f.arity))
         } else {
             self.static_functions.get_function(key)
         }
@@ -583,8 +580,8 @@ impl Template {
         flow_functions.insert(
             "http".into(),
             FlowDslFunction {
-                params: 1,
-                func: Box::new(|stack: &mut DSLStack| {
+                arity: Arity::Exact(1),
+                func: Box::new(|stack| {
                     let idx = stack.pop_int()? as usize;
 
                     // Check continue predicate before making a request

@@ -115,6 +115,107 @@ mod tests {
         }
     }
 
+    struct StringVariables<'a>(&'a [(&'a str, &'a str)]);
+    impl VariableContainer for StringVariables<'_> {
+        fn contains_key(&self, key: &str) -> bool {
+            self.0.iter().any(|(name, _)| *name == key)
+        }
+        fn get(&self, key: &str) -> Option<Value> {
+            self.0
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| Value::String((*value).into()))
+        }
+    }
+
+    #[test]
+    fn cyclic_string_substitution_returns_error() {
+        set_config(Config {
+            verbose: false,
+            debug: false,
+        });
+        let mut functions = FxHashMap::default();
+        functions.insert(
+            "contains".into(),
+            DslFunction::new(
+                2,
+                Box::new(|args| {
+                    let needle = args.pop_string()?;
+                    let haystack = args.pop_string()?;
+                    Ok(Value::Boolean(haystack.contains(&needle)))
+                }),
+            ),
+        );
+        let compiled =
+            compile_expression_validated("contains('{{body}}', 'x')", &functions).unwrap();
+
+        for (body, other) in [
+            ("{{body}}", ""),
+            ("{{other}}", "{{body}}"),
+            ("x{{body}}", ""),
+        ] {
+            let variables = StringVariables(&[("body", body), ("other", other)]);
+            assert_eq!(compiled.execute(&variables, &functions), Err(()), "{body}");
+        }
+    }
+
+    #[test]
+    fn string_substitution_preserves_finite_values() {
+        set_config(Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+        let variables = StringVariables(&[
+            ("body", "Hello {{name}}"),
+            ("name", "World"),
+            ("alias", "{{body}}"),
+        ]);
+
+        for (source, expected) in [
+            ("plain text", "plain text"),
+            ("{{name}}", "World"),
+            ("{{body}}", "Hello World"),
+            ("{{alias}}", "Hello World"),
+            ("{{name}}/{{name}}", "World/World"),
+            ("{{missing}}/{{name}}", "{{missing}}/World"),
+        ] {
+            let compiled = compile_expression(&format!("'{source}'")).unwrap();
+            assert_eq!(
+                compiled.execute(&variables, &functions),
+                Ok(Value::String(expected.into())),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn string_substitution_limit_allows_exactly_100_replacements() {
+        set_config(Config {
+            verbose: false,
+            debug: false,
+        });
+        let functions: FxHashMap<String, DslFunction> = FxHashMap::default();
+        let variables = StringVariables(&[("body", "x")]);
+
+        for count in [99, 100, 101] {
+            let source = format!("'{}{{{{missing}}}}'", "{{body}}".repeat(count));
+            let compiled = compile_expression(&source).unwrap();
+            assert_eq!(
+                compiled.execute(&variables, &functions),
+                if count <= 100 {
+                    Ok(Value::String(format!(
+                        "{}{{{{missing}}}}",
+                        "x".repeat(count)
+                    )))
+                } else {
+                    Err(())
+                },
+                "{count} replacements"
+            );
+        }
+    }
+
     #[test]
     fn call_arity_is_checked_before_invocation() {
         set_config(Config {

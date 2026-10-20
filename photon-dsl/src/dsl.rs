@@ -852,6 +852,8 @@ where
                     // TODO: Refactor, a bit lame to do the bracket pattern thing this late
                     // though we do it so late because we don't know when all required variables are available
                     let mut baked = val.clone();
+                    // Bound recursive substitution so cyclic values cannot loop forever.
+                    let mut substitutions = 0;
                     loop {
                         let mut changed = false;
                         let tmp = baked.clone();
@@ -861,10 +863,15 @@ where
                         for mat in matches.iter() {
                             let match_str = mat.get(1).unwrap().as_str();
                             if let Some(matched) = variables.get(match_str) {
+                                if substitutions == 100 {
+                                    debug!("String substitution limit reached");
+                                    return Err(());
+                                }
                                 baked.replace_range(
                                     mat.get(0).unwrap().range(),
                                     &matched.to_string(),
                                 );
+                                substitutions += 1;
                                 changed = true;
                                 break;
                             }

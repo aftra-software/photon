@@ -195,7 +195,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compressible_responses_fit_within_the_retained_memory_budget() {
+    fn boxed_response_buffers_match_cache_memory_accounting() {
         let mut cache = Cache::new(HashMap::new());
         cache.set_capacity(1024 * 1024);
         let keys: Vec<_> = (0..20)
@@ -218,22 +218,26 @@ mod tests {
             duration: 0.0,
         };
 
+        // These responses only fit together if the cache retains compressed buffers.
+        assert!(keys.len() * response.body.len() > cache.capacity);
         for key in &keys {
             cache.store(key, Some(response.clone()));
         }
+        assert!(keys.iter().all(|key| cache.contains(key)));
         for key in &keys {
             assert_eq!(cache.get(key).unwrap().body, response.body);
         }
 
-        // Converting each owned buffer to a Vec reuses its retained allocation.
-        let retained_bytes: usize = cache
+        // Boxed slices have no spare capacity, so their lengths are the retained
+        // response-buffer bytes that the cache must account for.
+        let retained_response_bytes: usize = cache
             .inner
             .into_values()
             .flatten()
-            .map(|buffer| Vec::<u8>::from(buffer).capacity())
+            .map(|buffer: Box<[u8]>| buffer.len())
             .sum();
-        assert_eq!(cache.used_capacity, retained_bytes);
-        assert!(retained_bytes <= cache.capacity);
+        assert_eq!(cache.used_capacity, retained_response_bytes);
+        assert!(retained_response_bytes <= cache.capacity);
     }
 
     #[test]

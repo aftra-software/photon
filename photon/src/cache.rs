@@ -25,7 +25,7 @@ pub struct CacheKey {
 
 #[derive(Clone)]
 pub struct Cache {
-    inner: HashMap<CacheKey, Option<Vec<u8>>>,
+    inner: HashMap<CacheKey, Option<Box<[u8]>>>,
     current_tokens: HashMap<CacheKey, u16>,
     tokens: HashMap<CacheKey, u16>,
     capacity: usize,
@@ -111,9 +111,12 @@ impl Cache {
         if let Some(data) = value {
             let encoded = bincode::encode_to_vec(data.clone(), config::standard()).unwrap();
             // Compression level 10 is used since `store` isn't called all that often, so spending a bit of time to save memory is worth it.
+            // LZ4 retains an input-sized Vec allocation; discard spare capacity so
+            // the cached buffer's length matches the bytes counted for eviction.
             let compressed =
                 block::compress(&encoded, Some(CompressionMode::HIGHCOMPRESSION(10)), true)
-                    .unwrap();
+                    .unwrap()
+                    .into_boxed_slice();
 
             self.increase_usage_and_evict_if_needed(compressed.len());
             self.inner.insert(key.clone(), Some(compressed));
@@ -190,6 +193,52 @@ impl RegexCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boxed_response_buffers_match_cache_memory_accounting() {
+        let mut cache = Cache::new(HashMap::new());
+        cache.set_capacity(1024 * 1024);
+        let keys: Vec<_> = (0..20)
+            .map(|i| CacheKey {
+                method: Method::GET,
+                headers: vec![],
+                path: format!("/{i}"),
+                body: vec![],
+                follow_redirects: false,
+                max_redirects: None,
+                extra_headers: vec![],
+                user_agent: String::new(),
+            })
+            .collect();
+        let response = HttpResponse {
+            req_url: String::new(),
+            body: vec![b'x'; 150_000],
+            headers: vec![],
+            status_code: 200,
+            duration: 0.0,
+        };
+
+        // These responses only fit together if the cache retains compressed buffers.
+        assert!(keys.len() * response.body.len() > cache.capacity);
+        for key in &keys {
+            cache.store(key, Some(response.clone()));
+        }
+        assert!(keys.iter().all(|key| cache.contains(key)));
+        for key in &keys {
+            assert_eq!(cache.get(key).unwrap().body, response.body);
+        }
+
+        // Boxed slices have no spare capacity, so their lengths are the retained
+        // response-buffer bytes that the cache must account for.
+        let retained_response_bytes: usize = cache
+            .inner
+            .into_values()
+            .flatten()
+            .map(|buffer: Box<[u8]>| buffer.len())
+            .sum();
+        assert_eq!(cache.used_capacity, retained_response_bytes);
+        assert!(retained_response_bytes <= cache.capacity);
+    }
 
     #[test]
     fn oversized_response_evicts_all_previous_entries() {

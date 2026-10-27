@@ -734,10 +734,7 @@ pub fn load_template(file: &str, regex_cache: &mut RegexCache) -> Result<Templat
     // e.g. http(1) && http(2) ...
     let flow = if !template_yaml["flow"].is_badvalue() {
         if let Some(flow) = template_yaml["flow"].as_str() {
-            Some(
-                compile_expression(flow)
-                    .map_err(|_| TemplateError::InvalidValue("flow".into()))?,
-            )
+            Some(compile_expression(flow).map_err(|_| TemplateError::InvalidValue("flow".into()))?)
         } else {
             return Err(TemplateError::InvalidValue("flow".into()));
         }

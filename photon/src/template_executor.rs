@@ -120,6 +120,9 @@ where
         self.execution_context.options = options;
     }
 
+    /// Sets the byte budget for request keys, entries, and compressed responses.
+    /// Zero disables caching. This does not limit hash-table slack, temporary
+    /// compression buffers, or total process memory.
     pub fn set_cache_memory_limit(&mut self, limit: usize) {
         self.execution_context.cache.set_capacity(limit);
     }

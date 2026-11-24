@@ -844,7 +844,7 @@ impl TemplateLoader {
         );
 
         // Request equivalence can only be determined from fully baked values at execution time.
-        let cache = Cache::new(Default::default());
+        let cache = Cache::new();
         Self {
             cache,
             regex_cache,

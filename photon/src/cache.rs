@@ -1,14 +1,17 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
-    usize,
+    mem::size_of,
 };
 
-use bincode::config;
+use bincode::{config, enc::write::SizeWriter};
 use lz4::block::{self, CompressionMode};
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
 use crate::{http::HttpResponse, template::Method};
+
+// Bound table overhead even when most responses are tiny or absent.
+const MAX_ENTRIES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 // The complete rendered request state that can affect the response.
@@ -23,114 +26,131 @@ pub struct CacheKey {
     pub user_agent: String,
 }
 
+impl CacheKey {
+    fn heap_bytes(&self) -> usize {
+        let headers = [&self.headers, &self.extra_headers]
+            .into_iter()
+            .map(|headers| {
+                headers.capacity() * size_of::<String>()
+                    + headers.iter().map(String::capacity).sum::<usize>()
+            })
+            .sum::<usize>();
+        headers + self.path.capacity() + self.body.capacity() + self.user_agent.capacity()
+    }
+}
+
+#[derive(Clone)]
+struct CachedResponse {
+    data: Option<Box<[u8]>>,
+    bytes: usize,
+}
+
 #[derive(Clone)]
 pub struct Cache {
-    inner: HashMap<CacheKey, Option<Box<[u8]>>>,
-    current_tokens: HashMap<CacheKey, u16>,
-    tokens: HashMap<CacheKey, u16>,
+    inner: HashMap<CacheKey, CachedResponse>,
     capacity: usize,
     used_capacity: usize,
 }
 
 impl Cache {
-    pub fn new(tokens: HashMap<CacheKey, u16>) -> Self {
-        let mut new = Self {
+    pub fn new() -> Self {
+        Self {
             inner: HashMap::new(),
-            current_tokens: HashMap::new(),
-            tokens,
             used_capacity: 0,
             capacity: usize::MAX,
-        };
-        new.reset();
-
-        new
+        }
     }
 
     pub fn set_capacity(&mut self, capacity: usize) {
         self.capacity = capacity;
-    }
-
-    #[allow(unused)]
-    fn decrease_token(&mut self, key: &CacheKey) {
-        let tokens_left = self.current_tokens.get_mut(key).unwrap();
-        if *tokens_left == 1 {
-            // Final token, we know this cache key will never be accessed again until we reset
-            self.current_tokens.remove(key);
-            self.inner.remove(key);
-
-            // Clear out freed data so that other threads/whatever can utilize it
-            self.current_tokens.shrink_to_fit();
-            self.inner.shrink_to_fit();
-        } else {
-            *tokens_left -= 1;
+        if self.used_capacity > capacity {
+            self.reset();
         }
-    }
-
-    fn increase_usage_and_evict_if_needed(&mut self, amount: usize) {
-        while self.used_capacity > 0 && amount > self.capacity.saturating_sub(self.used_capacity) {
-            let biggest_entry = self
-                .inner
-                .iter()
-                .filter_map(|(key, value)| value.as_ref().map(|data| (key, data.len())))
-                .max_by_key(|(_, size)| *size)
-                .map(|(key, size)| (key.clone(), size));
-
-            if let Some((key, size)) = biggest_entry {
-                self.inner.remove(&key);
-                self.used_capacity -= size;
-            }
-        }
-        self.used_capacity += amount;
     }
 
     pub fn reset(&mut self) {
-        self.inner.clear();
-        self.current_tokens = self.tokens.clone();
+        self.inner = HashMap::new();
+        self.used_capacity = 0;
     }
 
-    pub fn get(&mut self, key: &CacheKey) -> Option<HttpResponse> {
-        let ret = self.inner.get(key).unwrap().clone();
-        // XXX: Tokens are currently used to determine if its likely a request
-        // repeated across multiple templates, thus we don't decrease currently
-        //self.decrease_token(key);
-        if let Some(data) = ret {
-            // Unwraps below should be 100% safe, since both bincode and compressed data are created by `store` function below.
-            let decompressed = block::decompress(&data, None).unwrap();
-            let (resp, _) = bincode::decode_from_slice(&decompressed, config::standard()).unwrap();
-            Some(resp)
-        } else {
-            None
+    // The outer option distinguishes a miss from a cached request failure.
+    pub fn get(&self, key: &CacheKey) -> Option<Option<HttpResponse>> {
+        let entry = self.inner.get(key)?;
+        Some(entry.data.as_deref().map(|data| {
+            // The cache only stores buffers it encoded and compressed itself.
+            let decompressed = block::decompress(data, None).unwrap();
+            bincode::decode_from_slice(&decompressed, config::standard())
+                .unwrap()
+                .0
+        }))
+    }
+
+    pub fn store(&mut self, key: CacheKey, response: Option<&HttpResponse>) {
+        let overhead = size_of::<(CacheKey, CachedResponse)>() + key.heap_bytes();
+        let Some(response_budget) = self.capacity.checked_sub(overhead) else {
+            return;
+        };
+        if self.inner.contains_key(&key) {
+            return;
         }
-    }
+        let data = match response {
+            Some(response) => {
+                let Some(data) = compress_response(response, response_budget) else {
+                    return;
+                };
+                Some(data)
+            }
+            None => None,
+        };
+        let bytes = overhead + data.as_deref().map_or(0, <[u8]>::len);
 
-    pub fn contains(&self, key: &CacheKey) -> bool {
-        self.inner.contains_key(key)
-    }
-
-    pub fn store(&mut self, key: &CacheKey, value: Option<HttpResponse>) {
-        if let Some(data) = value {
-            let encoded = bincode::encode_to_vec(data.clone(), config::standard()).unwrap();
-            // Compression level 10 is used since `store` isn't called all that often, so spending a bit of time to save memory is worth it.
-            // LZ4 retains an input-sized Vec allocation; discard spare capacity so
-            // the cached buffer's length matches the bytes counted for eviction.
-            let compressed =
-                block::compress(&encoded, Some(CompressionMode::HIGHCOMPRESSION(10)), true)
-                    .unwrap()
-                    .into_boxed_slice();
-
-            self.increase_usage_and_evict_if_needed(compressed.len());
-            self.inner.insert(key.clone(), Some(compressed));
-        } else {
-            self.inner.insert(key.clone(), None);
+        // Admit only after the whole entry fits by itself, so an oversized
+        // response doesn't flush useful entries. Count failures as well.
+        while self.inner.len() >= MAX_ENTRIES || self.used_capacity > self.capacity - bytes {
+            let (victim, entry) = self
+                .inner
+                .iter()
+                .max_by_key(|(_, entry)| entry.bytes)
+                .unwrap();
+            let (victim, victim_bytes) = (victim.clone(), entry.bytes);
+            self.inner.remove(&victim);
+            self.used_capacity -= victim_bytes;
         }
+        self.inner.insert(key, CachedResponse { data, bytes });
+        self.used_capacity += bytes;
+    }
+}
+
+fn compress_response(response: &HttpResponse, budget: usize) -> Option<Box<[u8]>> {
+    // LZ4 prepends the uncompressed size. Skip encoding responses larger
+    // than the budget, even if they might compress enough to fit.
+    let prefix = size_of::<u32>();
+    if budget <= prefix {
+        return None;
+    }
+    let config = config::standard();
+    let mut size = SizeWriter::default();
+    bincode::encode_into_writer(response, &mut size, config).ok()?;
+    let size = size.bytes_written;
+    if size > budget {
+        return None;
     }
 
-    pub fn can_cache(&self, _key: &CacheKey) -> bool {
-        //self.current_tokens.contains_key(key)
-
-        // XXX: Always return true for now, while the caching implementation caches all requests
-        true
-    }
+    let bound = block::compress_bound(size).ok()? + prefix;
+    let mut encoded = vec![0; size];
+    bincode::encode_into_slice(response, &mut encoded, config).ok()?;
+    let mut compressed = vec![0; bound.min(budget)];
+    let written = block::compress_to_buffer(
+        &encoded,
+        Some(CompressionMode::HIGHCOMPRESSION(10)),
+        true,
+        &mut compressed,
+    )
+    .ok()?;
+    drop(encoded);
+    compressed.truncate(written);
+    // Discard LZ4 output's spare capacity to retain only the charged bytes.
+    Some(compressed.into_boxed_slice())
 }
 
 #[derive(Clone)]
@@ -194,142 +214,161 @@ impl RegexCache {
 mod tests {
     use super::*;
 
-    #[test]
-    fn boxed_response_buffers_match_cache_memory_accounting() {
-        let mut cache = Cache::new(HashMap::new());
-        cache.set_capacity(1024 * 1024);
-        let keys: Vec<_> = (0..20)
-            .map(|i| CacheKey {
-                method: Method::GET,
-                headers: vec![],
-                path: format!("/{i}"),
-                body: vec![],
-                follow_redirects: false,
-                max_redirects: None,
-                extra_headers: vec![],
-                user_agent: String::new(),
-            })
-            .collect();
-        let response = HttpResponse {
+    fn key(index: usize) -> CacheKey {
+        CacheKey {
+            method: Method::GET,
+            headers: vec![],
+            path: format!("/{index:05}"),
+            body: vec![],
+            follow_redirects: false,
+            max_redirects: None,
+            extra_headers: vec![],
+            user_agent: String::new(),
+        }
+    }
+
+    fn response(body: Vec<u8>) -> HttpResponse {
+        HttpResponse {
             req_url: String::new(),
-            body: vec![b'x'; 150_000],
+            body,
             headers: vec![],
             status_code: 200,
             duration: 0.0,
-        };
+        }
+    }
+
+    #[test]
+    fn boxed_response_buffers_match_cache_memory_accounting() {
+        let mut cache = Cache::new();
+        cache.set_capacity(1024 * 1024);
+        let keys: Vec<_> = (0..20).map(key).collect();
+        let response = response(vec![b'x'; 150_000]);
 
         // These responses only fit together if the cache retains compressed buffers.
         assert!(keys.len() * response.body.len() > cache.capacity);
         for key in &keys {
-            cache.store(key, Some(response.clone()));
+            cache.store(key.clone(), Some(&response));
         }
-        assert!(keys.iter().all(|key| cache.contains(key)));
         for key in &keys {
-            assert_eq!(cache.get(key).unwrap().body, response.body);
+            assert_eq!(cache.get(key).unwrap().unwrap().body, response.body);
         }
 
-        // Boxed slices have no spare capacity, so their lengths are the retained
-        // response-buffer bytes that the cache must account for.
-        let retained_response_bytes: usize = cache
+        let retained_bytes: usize = cache
             .inner
-            .into_values()
-            .flatten()
-            .map(|buffer: Box<[u8]>| buffer.len())
+            .iter()
+            .map(|(key, entry)| {
+                size_of::<(CacheKey, CachedResponse)>()
+                    + key.heap_bytes()
+                    + entry.data.as_ref().unwrap().len()
+            })
             .sum();
-        assert_eq!(cache.used_capacity, retained_response_bytes);
-        assert!(retained_response_bytes <= cache.capacity);
+        assert_eq!(cache.used_capacity, retained_bytes);
+        assert!(retained_bytes <= cache.capacity);
     }
 
     #[test]
-    fn oversized_response_evicts_all_previous_entries() {
-        let mut cache = Cache::new(HashMap::new());
-        let keys: Vec<_> = (0..4)
-            .map(|i| CacheKey {
-                method: Method::GET,
-                headers: vec![],
-                path: format!("/{i}"),
-                body: vec![],
-                follow_redirects: false,
-                max_redirects: None,
-                extra_headers: vec![],
-                user_agent: String::new(),
-            })
-            .collect();
-        let small_response = HttpResponse {
-            req_url: String::new(),
-            body: vec![b'x'; 25],
-            headers: vec![],
-            status_code: 200,
-            duration: 0.0,
-        };
+    fn oversized_response_is_not_cached_and_does_not_evict() {
+        let mut cache = Cache::new();
+        let small = response(vec![b'x'; 25]);
+        cache.store(key(0), Some(&small));
+        let original_usage = cache.used_capacity;
 
-        cache.store(&keys[0], Some(small_response.clone()));
-        let small_size = cache.inner[&keys[0]].as_ref().unwrap().len();
-        cache.set_capacity(small_size * 3);
-        for key in &keys[1..3] {
-            cache.store(key, Some(small_response.clone()));
-        }
-        assert!(keys[..3].iter().all(|key| cache.contains(key)));
-        assert_eq!(cache.used_capacity, cache.capacity);
+        let uncompressible = response((0..=255).collect());
+        let size = bincode::encode_to_vec(&uncompressible, config::standard())
+            .unwrap()
+            .len();
+        // The byte budget fits the raw encoding but not LZ4's overhead.
+        cache.set_capacity(size_of::<(CacheKey, CachedResponse)>() + key(1).heap_bytes() + size);
+        cache.store(key(1), Some(&uncompressible));
+        assert!(cache.get(&key(1)).is_none());
 
-        let large_response = HttpResponse {
-            // Distinct bytes keep this larger than the limit after compression.
-            body: (0..=255).collect(),
-            ..small_response
-        };
-        cache.store(&keys[3], Some(large_response.clone()));
+        // Even a compressible response is skipped if encoding it would
+        // allocate scratch space larger than the configured budget.
+        cache.store(key(2), Some(&response(vec![b'x'; 4_096])));
+        assert!(cache.get(&key(2)).is_none());
 
-        let large_size = cache.inner[&keys[3]].as_ref().unwrap().len();
-        assert!(large_size > cache.capacity);
-        assert!(keys[..3].iter().all(|key| !cache.contains(key)));
-        assert_eq!(cache.inner.len(), 1);
-        assert_eq!(cache.used_capacity, large_size);
-        assert_eq!(cache.get(&keys[3]).unwrap().body, large_response.body);
+        assert_eq!(cache.get(&key(0)).unwrap().unwrap().body, small.body);
+        assert_eq!(cache.used_capacity, original_usage);
     }
 
     #[test]
     fn cache_evicts_an_entry_when_capacity_is_exceeded() {
-        let mut cache = Cache::new(HashMap::new());
-        let keys: Vec<_> = (0..5)
-            .map(|i| CacheKey {
-                method: Method::GET,
-                headers: vec![],
-                path: format!("/{i}"),
-                body: vec![],
-                follow_redirects: false,
-                max_redirects: None,
-                extra_headers: vec![],
-                user_agent: String::new(),
-            })
-            .collect();
-        let response = HttpResponse {
-            req_url: String::new(),
-            body: vec![b'x'; 25],
-            headers: vec![],
-            status_code: 200,
-            duration: 0.0,
-        };
-
-        cache.store(&keys[0], Some(response.clone()));
-        // Capacity counts compressed responses, rather than just their bodies.
-        let entry_size = cache.inner[&keys[0]].as_ref().unwrap().len();
+        let mut cache = Cache::new();
+        let response = response(vec![b'x'; 25]);
+        cache.store(key(0), Some(&response));
+        let entry_size = cache.used_capacity;
         cache.set_capacity(entry_size * 4);
 
-        for key in &keys[1..4] {
-            cache.store(key, Some(response.clone()));
+        for index in 1..4 {
+            cache.store(key(index), Some(&response));
         }
-        assert!(keys[..4].iter().all(|key| cache.contains(key)));
+        assert!((0..4).all(|index| cache.get(&key(index)).is_some()));
         assert_eq!(cache.used_capacity, entry_size * 4);
 
-        cache.store(&keys[4], Some(response));
+        cache.store(key(4), Some(&response));
 
-        assert!(cache.contains(&keys[4]));
+        assert_eq!(cache.get(&key(4)).unwrap().unwrap().body, response.body);
         assert_eq!(cache.inner.len(), 4);
         assert_eq!(cache.used_capacity, entry_size * 4);
         // Equal-sized entries can be evicted in any order.
         assert_eq!(
-            keys[..4].iter().filter(|key| cache.contains(key)).count(),
+            (0..4)
+                .filter(|&index| cache.get(&key(index)).is_some())
+                .count(),
             3
         );
+    }
+
+    #[test]
+    fn failure_entries_charge_for_request_keys() {
+        let mut cache = Cache::new();
+        cache.store(key(0), None);
+        let entry_size = cache.used_capacity;
+        assert!(matches!(cache.get(&key(0)), Some(None)));
+        cache.set_capacity(entry_size);
+
+        let large_key = CacheKey {
+            headers: vec!["X-Fixture: ".to_string() + &"x".repeat(4_096)],
+            ..key(1)
+        };
+        cache.store(large_key.clone(), None);
+        assert!(cache.get(&large_key).is_none());
+        assert!(matches!(cache.get(&key(0)), Some(None)));
+
+        cache.store(key(2), None);
+        assert!(cache.get(&key(0)).is_none());
+        assert!(matches!(cache.get(&key(2)), Some(None)));
+        assert_eq!(cache.used_capacity, entry_size);
+    }
+
+    #[test]
+    fn entry_count_is_bounded_even_with_an_unlimited_byte_budget() {
+        let mut cache = Cache::new();
+        for index in 0..=MAX_ENTRIES {
+            cache.store(key(index), None);
+        }
+
+        assert_eq!(cache.inner.len(), MAX_ENTRIES);
+        assert!(matches!(cache.get(&key(MAX_ENTRIES)), Some(None)));
+    }
+
+    #[test]
+    fn reset_releases_the_budget_and_zero_disables_caching() {
+        let mut cache = Cache::new();
+        cache.store(key(0), None);
+        let entry_size = cache.used_capacity;
+        cache.set_capacity(entry_size);
+        cache.reset();
+        assert!(cache.get(&key(0)).is_none());
+
+        cache.store(key(1), None);
+        assert!(matches!(cache.get(&key(1)), Some(None)));
+        assert_eq!(cache.used_capacity, entry_size);
+
+        cache.set_capacity(0);
+        assert!(cache.get(&key(1)).is_none());
+        cache.store(key(2), None);
+        assert!(cache.get(&key(2)).is_none());
+        assert_eq!(cache.used_capacity, 0);
     }
 }

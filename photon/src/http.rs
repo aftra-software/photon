@@ -348,60 +348,40 @@ impl HttpReq {
             .collect::<Result<Vec<_>, _>>()
             .ok()?;
 
-        // Skip caching below if we know the request is only happening once
-        // XXX: Currently caches all requests, regardless of if their responses are re-used
         let key = CacheKey {
             method: self.method,
-            headers: headers.clone(),
-            path: path.clone(),
-            body: body.as_bytes().to_vec(),
+            headers,
+            path,
+            body: body.into_bytes(),
             follow_redirects: self.follow_redirects,
             max_redirects: self.max_redirects,
             extra_headers: exec_ctx.options.extra_headers.clone(),
             user_agent: exec_ctx.options.user_agent.clone(),
         };
-        if !exec_ctx.cache.can_cache(&key) {
-            let res = self.internal_request(
-                &path,
-                &headers,
-                body.as_bytes(),
-                &exec_ctx.options,
-                curl,
-                &mut exec_ctx.total_reqs,
-            );
-            if let Some(resp) = res {
-                return Some(resp);
-            } else {
-                return None;
-            }
+        if let Some(response) = exec_ctx.cache.get(&key) {
+            return response;
         }
 
-        if !exec_ctx.cache.contains(&key) {
-            let res = self.internal_request(
-                &path,
-                &headers,
-                body.as_bytes(),
-                &exec_ctx.options,
-                curl,
-                &mut exec_ctx.total_reqs,
-            );
-            if let Some(resp) = res {
-                exec_ctx.cache.store(&key, Some(resp));
-            } else {
-                exec_ctx.cache.store(&key, None);
-            }
-        }
-
-        exec_ctx.cache.get(&key)
+        let response = self.internal_request(
+            &key.path,
+            &key.headers,
+            &key.body,
+            &exec_ctx.options,
+            curl,
+            &mut exec_ctx.total_reqs,
+        );
+        exec_ctx.cache.store(key, response.as_ref());
+        response
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
-        io::{Read, Write},
+        io::{BufRead, BufReader, Read, Write},
         net::TcpListener,
         thread,
+        time::Duration,
     };
 
     use curl::easy::Easy2;
@@ -474,7 +454,7 @@ mod tests {
             options: ExecutionOptions::default(),
             ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
             total_reqs: 0,
-            cache: Cache::new(Default::default()),
+            cache: Cache::new(),
             regex_cache: RegexCache::new(),
         };
         let photon_ctx = PhotonContext {
@@ -490,18 +470,82 @@ mod tests {
             };
             ctx.insert_str("username", username);
             ctx.insert_str("token", token);
-            assert!(
-                request
-                    .do_request(&base_url, &mut exec_ctx, &photon_ctx, &mut curl, &ctx)
-                    .is_some()
-            );
+            let response = request
+                .do_request(&base_url, &mut exec_ctx, &photon_ctx, &mut curl, &ctx)
+                .unwrap();
+            assert_eq!(response.body, b"ok");
         }
 
-        let requests = server.join().unwrap();
         assert_eq!(exec_ctx.total_reqs, 2);
+        let requests = server.join().unwrap();
         assert!(requests[0].contains("X-Token: first"));
         assert!(requests[0].ends_with("username=admin"));
         assert!(requests[1].contains("X-Token: second"));
         assert!(requests[1].ends_with("username=root"));
+    }
+
+    #[test]
+    fn oversized_responses_are_returned_intact_and_not_reused() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            for byte in [b'a', b'b'] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut reader = BufReader::new(&mut stream);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+                stream.write_all(&[byte; 4_096]).unwrap();
+            }
+        });
+        let request = HttpReq {
+            method: Method::GET,
+            headers: vec![],
+            path: TemplateString::from(format!("{base_url}/fixture")),
+            body: TemplateString::from(String::new()),
+            raw: None,
+            follow_redirects: false,
+            max_redirects: None,
+        };
+        let mut exec_ctx = ExecutionContext {
+            options: ExecutionOptions::default(),
+            ctx: Context::new_scoped_with_parent(ContextScope::Global, None),
+            total_reqs: 0,
+            cache: Cache::new(),
+            regex_cache: RegexCache::new(),
+        };
+        exec_ctx.cache.set_capacity(1_024);
+        let photon_ctx = PhotonContext {
+            functions: init_functions(),
+        };
+        let ctx = Context {
+            variables: FxHashMap::default(),
+            parent: None,
+            scope: ContextScope::Request,
+        };
+        let mut curl = Easy2::new(Collector(Vec::new(), Vec::new()));
+
+        for byte in [b'a', b'b'] {
+            let response = request
+                .do_request(&base_url, &mut exec_ctx, &photon_ctx, &mut curl, &ctx)
+                .unwrap();
+            assert_eq!(response.status_code, 200);
+            assert_eq!(response.body, [byte; 4_096]);
+        }
+        assert_eq!(exec_ctx.total_reqs, 2);
+        server.join().unwrap();
     }
 }
